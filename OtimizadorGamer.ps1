@@ -276,7 +276,8 @@ function Recomendar-Armazenamento {
                 $phys = Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq $disk.FriendlyName } | Select-Object -First 1
                 if ($phys -and $phys.MediaType -ne 'Unspecified') { $tipo = [string]$phys.MediaType }
             } catch { }
-            $msg = "Unidade $($v.DriveLetter): tipo $tipo; livre $($v.SizeRemaining / 1GB -as [double] -as [string]) GB ($livrePct%)."
+            $livreGB = [math]::Round($v.SizeRemaining / 1GB, 1)
+            $msg = "Unidade $($v.DriveLetter): tipo $tipo; livre $livreGB GB ($livrePct%)."
             if ($livrePct -lt 10) { Log ($msg + ' CRITICO: libere espaco com cuidado.') Red }
             elseif ($livrePct -lt $script:LimiteEspacoLivre) { Log ($msg + ' Recomendacao: revisar arquivos grandes e temporarios.') Yellow }
             else { Log $msg Green }
@@ -1277,6 +1278,7 @@ $pgDes.Controls.Add((Novo-Botao "PERFIL JOGOS`nAlto desempenho quando disponivel
 $pgDes.Controls.Add((Novo-Botao "PERFIL EQUILIBRADO`nUso diario e consumo moderado" { Aplicar-Perfil 'Equilibrado' } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "PERFIL ECONOMIA`nReduz consumo quando disponivel" { Aplicar-Perfil 'Economia' } $script:Paleta.Amarelo))
 $pgDes.Controls.Add((Novo-Botao "INICIALIZACAO DO WINDOWS`nGerencie apps nas ferramentas nativas" { Abrir-GerenciadorInicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "LISTAR APPS DE INICIALIZACAO`nMostra os itens que iniciam com o Windows" { Listar-Inicializacao } $script:Paleta.Neon))
 $pgDes.Controls.Add((Novo-Botao "RESUMO DE HARDWARE`nCPU, RAM, GPU e discos detectados" { Mostrar-ResumoHardware } $script:Paleta.Neon))
 
 # ---------- Pagina: DISCO ----------
