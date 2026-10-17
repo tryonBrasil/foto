@@ -1,0 +1,60 @@
+name: Compilar Otimizador Gamer
+
+on:
+  push:
+    branches:
+      - evolucao/otimizador-dashboard-recursos
+    paths:
+      - 'OtimizadorGamer.ps1'
+      - '.github/workflows/compilar-otimizador.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Validar sintaxe PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'OtimizadorGamer.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
+
+      - name: Instalar PS2EXE
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module ps2exe -Scope CurrentUser -Force
+          Import-Module ps2exe
+
+      - name: Compilar executável
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Invoke-PS2EXE -InputFile 'OtimizadorGamer.ps1' -OutputFile 'dist/OtimizadorGamer.exe' -NoConsole -Title 'Otimizador Gamer' -Product 'Otimizador Gamer' -Company 'Tryon Brasil' -Version '2.1.0.0' -FileVersion '2.1.0.0' -Copyright 'Tryon Brasil'
+          if (!(Test-Path 'dist/OtimizadorGamer.exe')) { throw 'O executável não foi gerado.' }
+          $file = Get-Item 'dist/OtimizadorGamer.exe'
+          Write-Host "Executável gerado: $($file.Length) bytes"
+          if ($file.Length -lt 50000) { throw 'Executável muito pequeno; compilação suspeita.' }
+
+      - name: Publicar artefato para teste
+        uses: actions/upload-artifact@v4
+        with:
+          name: OtimizadorGamer-Windows-x64
+          path: dist/OtimizadorGamer.exe
+          if-no-files-found: error
+          retention-days: 14
