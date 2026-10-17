@@ -1240,7 +1240,33 @@ $lblVersao.Location = New-Object System.Drawing.Point(20, 458)
 $lateral.Controls.Add($lblVersao)
 
 # ---------- Pagina: PAINEL ----------
-$pgInicio = Nova-Pagina 'inicio' 'PAINEL' 'Visao geral do seu PC em tempo real. Tudo que altera o sistema tem backup e pode ser desfeito.'
+$pgInicio = Nova-Pagina 'inicio' 'PAINEL DE CONTROLE' 'Acompanhe o computador, execute manutencoes seguras e ajuste o desempenho sem perder o controle.'
+
+# Banner principal do dashboard: visual informativo, sem inventar telemetria.
+$bannerInicio = New-Object System.Windows.Forms.Panel
+$bannerInicio.Size = New-Object System.Drawing.Size(820, 82)
+$bannerInicio.BackColor = (ParaCor '#0B2540')
+$bannerInicio.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 18)
+$faixaBanner = New-Object System.Windows.Forms.Panel
+$faixaBanner.Dock = 'Left'; $faixaBanner.Width = 5
+$faixaBanner.BackColor = (ParaCor $script:Paleta.Cian)
+$bannerInicio.Controls.Add($faixaBanner)
+$bannerTitulo = New-Object System.Windows.Forms.Label
+$bannerTitulo.Text = 'SEU SETUP, SOB CONTROLE'
+$bannerTitulo.AutoSize = $true
+$bannerTitulo.Font = (Fonte 'Segoe UI Semibold' 15 'Bold')
+$bannerTitulo.ForeColor = (ParaCor $script:Paleta.Texto)
+$bannerTitulo.Location = New-Object System.Drawing.Point(22, 13)
+$bannerInicio.Controls.Add($bannerTitulo)
+$bannerTexto = New-Object System.Windows.Forms.Label
+$bannerTexto.Text = 'Ferramentas de desempenho, diagnostico e manutencao em um so lugar.'
+$bannerTexto.AutoSize = $true
+$bannerTexto.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+$bannerTexto.ForeColor = (ParaCor $script:Paleta.Mudo)
+$bannerTexto.Location = New-Object System.Drawing.Point(23, 46)
+$bannerInicio.Controls.Add($bannerTexto)
+$pgInicio.Controls.Add($bannerInicio)
+$pgInicio.SetFlowBreak($bannerInicio, $true)
 $script:CardCPU   = Novo-Card 'CPU' $script:Paleta.Neon
 $script:CardRAM   = Novo-Card 'MEMORIA RAM' $script:Paleta.Cian
 $script:CardGPU   = Novo-Card 'GPU (AMD/NVIDIA)' $script:Paleta.Rosa
