@@ -1,0 +1,58 @@
+name: Validar Otimizador Gamer
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'OtimizadorGamer.ps1'
+      - '.github/workflows/validar-otimizador.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-parse:
+    runs-on: windows-latest
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Validar sintaxe PowerShell
+        shell: powershell
+        run: |
+          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.ps1'
+          $tokens = $null
+          $erros = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($arquivo, [ref]$tokens, [ref]$erros) | Out-Null
+          if ($erros.Count -gt 0) {
+            $erros | ForEach-Object { Write-Error ("Linha {0}, coluna {1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) }
+            exit 1
+          }
+          Write-Host 'OK: sintaxe PowerShell aceita pelo parser do Windows.'
+
+      - name: Verificar protecoes de limpeza e restauracao
+        shell: powershell
+        run: |
+          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.ps1') -Raw
+          $verificacoes = @(
+            @{ Nome = 'Confirma limpeza'; Regex = 'Confirmar\s+"A limpeza remove arquivos temporarios' },
+            @{ Nome = 'Preserva Lixeira'; Regex = 'A Lixeira e preservada intencionalmente' },
+            @{ Nome = 'Backup DNS por adaptador'; Regex = 'DNSOriginal\|\$\(\$a\.ifIndex\)' },
+            @{ Nome = 'Restauracao DNS'; Regex = 'Set-DnsClientServerAddress -InterfaceIndex \$indice' },
+            @{ Nome = 'Confirma plano de energia'; Regex = 'Plano Alto desempenho ativado e confirmado' },
+            @{ Nome = 'Aviso sensores AMD/Intel'; Regex = 'ainda nao le sensores desses fabricantes' }
+          )
+          $falhas = @()
+          foreach ($v in $verificacoes) {
+            if ($codigo -notmatch $v.Regex) { $falhas += $v.Nome }
+            else { Write-Host ("OK: " + $v.Nome) }
+          }
+          if ($codigo -match 'Clear-RecycleBin|LOCALAPPDATA\\NVIDIA\\DXCache|LOCALAPPDATA\\AMD\\DxCache') {
+            $falhas += 'A limpeza ainda inclui Lixeira ou caches de shaders'
+          }
+          if ($falhas.Count -gt 0) {
+            $falhas | ForEach-Object { Write-Error ("Falhou: " + $_) }
+            exit 1
+          }
+          Write-Host 'OK: verificacoes estaticas de seguranca passaram.'
