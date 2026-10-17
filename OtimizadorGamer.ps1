@@ -255,12 +255,29 @@ function Desfazer-Ajustes {
     Log '--- Desfazendo ajustes ---' Cyan
     if (-not (Test-Path $script:BackupFile)) { Log 'Nenhum backup encontrado.' Yellow; return }
     $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $falhaRestauracaoDNS = $false
     foreach ($p in $b.PSObject.Properties) {
         if ($p.Name -eq 'PlanoEnergia') {
             powercfg /setactive $p.Value 2>$null
             Log 'Plano de energia restaurado.'
         } elseif ($p.Name -eq 'DNSAlterado') {
-            Aplicar-DNS 'Automatico'
+            # Marcador legado: a restauracao real e feita pelas entradas DNSOriginal.
+            continue
+        } elseif ($p.Name -like 'DNSOriginal|*') {
+            try {
+                $dns = $p.Value
+                $indice = [int]$dns.InterfaceIndex
+                $servidores = @($dns.ServerAddresses | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+                if ($servidores.Count -gt 0) {
+                    Set-DnsClientServerAddress -InterfaceIndex $indice -ServerAddresses $servidores -ErrorAction Stop
+                } else {
+                    Set-DnsClientServerAddress -InterfaceIndex $indice -ResetServerAddresses -ErrorAction Stop
+                }
+                Log "DNS original restaurado: $($dns.InterfaceAlias)" Green
+            } catch {
+                $falhaRestauracaoDNS = $true
+                Log "Nao foi possivel restaurar o DNS ($($p.Name)): $($_.Exception.Message)" Yellow
+            }
         } elseif ($p.Name -like '*|*') {
             $partes = $p.Name -split '\|', 2
             $caminho = $partes[0]; $nome = $partes[1]
@@ -272,8 +289,12 @@ function Desfazer-Ajustes {
             Log "Restaurado: $nome"
         }
     }
-    Remove-Item $script:BackupFile -Force
-    Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    if ($falhaRestauracaoDNS) {
+        Log 'O backup foi mantido porque algum DNS nao foi restaurado. Corrija a conexao e tente DESFAZER novamente.' Yellow
+    } else {
+        Remove-Item $script:BackupFile -Force
+        Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    }
 }
 
 # ============================================================
@@ -281,10 +302,14 @@ function Desfazer-Ajustes {
 # ============================================================
 function Limpar-Temporarios {
     Log '--- Limpeza de temporarios ---' Cyan
+    if (-not (Confirmar "A limpeza remove arquivos temporarios que podem estar em uso. Os caches de shaders e a Lixeira serao preservados para evitar recompilacao e perda de arquivos. Continuar?")) {
+        Log 'Limpeza cancelada pelo usuario.' Yellow
+        return
+    }
+    # Nao apagar caches de shaders: o Windows/jogos podem precisar recompila-los,
+    # causando travamentos temporarios depois da limpeza.
     $alvos = @(
-        $env:TEMP, "$env:SystemRoot\Temp",
-        "$env:LOCALAPPDATA\D3DSCache", "$env:LOCALAPPDATA\NVIDIA\DXCache",
-        "$env:LOCALAPPDATA\NVIDIA\GLCache", "$env:LOCALAPPDATA\AMD\DxCache"
+        $env:TEMP, "$env:SystemRoot\Temp"
     )
     $letra = $env:SystemDrive.TrimEnd(':')
     $livreAntes = (Get-PSDrive -Name $letra).Free
@@ -295,7 +320,7 @@ function Limpar-Temporarios {
             Log "Limpo: $a"
         }
     }
-    try { Clear-RecycleBin -Force -ErrorAction Stop; Log 'Lixeira esvaziada.' } catch { }
+    # A Lixeira e preservada intencionalmente; esvazia-la pode causar perda de dados.
     $livreDepois = (Get-PSDrive -Name $letra).Free
     $liberado = [math]::Round(($livreDepois - $livreAntes) / 1MB)
     Log "Espaco liberado: aproximadamente $liberado MB" Green
@@ -311,7 +336,12 @@ function Ajustar-Energia {
         $novo = powercfg -duplicatescheme $altoDesempenho 2>$null
         if ($novo -match '([0-9a-fA-F\-]{36})') { powercfg /setactive $Matches[1] }
     }
-    Log 'Plano Alto desempenho ativado.' Green
+    $planoFinal = Plano-Atual
+    if ($planoFinal -eq $altoDesempenho) {
+        Log 'Plano Alto desempenho ativado e confirmado.' Green
+    } else {
+        Log 'O Windows nao confirmou a ativacao do plano Alto desempenho. Mantendo o plano atual.' Yellow
+    }
 }
 
 function Ajustar-ModoJogo {
@@ -505,6 +535,21 @@ function Aplicar-DNS {
     $adaptadores = @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' })
     foreach ($a in $adaptadores) {
         try {
+            # Guarda a configuracao IPv4 original de cada adaptador apenas uma vez.
+            # Um array vazio significa DNS automatico/DHCP e tambem precisa ser restaurado.
+            if ($Opcao -ne 'Automatico') {
+                $chaveBackup = "DNSOriginal|$($a.ifIndex)"
+                if ($null -eq (Ler-Backup $chaveBackup)) {
+                    $dnsOriginal = @(Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -ExpandProperty ServerAddresses)
+                    Salvar-Backup -Chave $chaveBackup -Valor ([pscustomobject]@{
+                        InterfaceIndex = [int]$a.ifIndex
+                        InterfaceAlias = [string]$a.Name
+                        ServerAddresses = @($dnsOriginal)
+                    })
+                }
+            }
+
             if ($Opcao -eq 'Cloudflare') {
                 Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @('1.1.1.1', '1.0.0.1') -ErrorAction Stop
             } elseif ($Opcao -eq 'Google') {
@@ -1057,7 +1102,7 @@ $lateral.Controls.Add($lblVersao)
 $pgInicio = Nova-Pagina 'inicio' 'PAINEL' 'Visao geral do seu PC em tempo real. Tudo que altera o sistema tem backup e pode ser desfeito.'
 $script:CardCPU   = Novo-Card 'CPU' $script:Paleta.Neon
 $script:CardRAM   = Novo-Card 'MEMORIA RAM' $script:Paleta.Cian
-$script:CardGPU   = Novo-Card 'GPU (NVIDIA)' $script:Paleta.Rosa
+$script:CardGPU   = Novo-Card 'GPU (AMD/NVIDIA)' $script:Paleta.Rosa
 $script:CardTemp  = Novo-Card 'TEMP CPU / GPU' $script:Paleta.Amarelo
 $script:CardDisco = Novo-Card 'LIVRE NO SISTEMA' $script:Paleta.Neon
 foreach ($c in @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:CardTemp, $script:CardDisco)) {
@@ -1065,7 +1110,7 @@ foreach ($c in @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:Card
 }
 $pgInicio.SetFlowBreak($script:CardDisco.Painel, $true)
 
-$btnTudo = Novo-Botao "EXECUTAR TUDO (RECOMENDADO)`nLimpeza, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 538 74
+$btnTudo = Novo-Botao "EXECUTAR TUDO (RECOMENDADO)`nLimpeza segura, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 538 74
 $pgInicio.Controls.Add($btnTudo)
 $pgInicio.SetFlowBreak($btnTudo, $true)
 $pgInicio.Controls.Add((Novo-Botao "PONTO DE RESTAURACAO`nCria um ponto antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
@@ -1074,7 +1119,7 @@ $pgInicio.Controls.Add((Novo-Botao "DESFAZER AJUSTES`nVolta registro, energia e 
 # ---------- Pagina: DESEMPENHO ----------
 $pgDes = Nova-Pagina 'desempenho' 'DESEMPENHO' 'Limpeza, energia, modo jogo e ajustes do sistema para ganhar FPS e estabilidade.'
 Nova-Secao $pgDes 'LIMPEZA E ENERGIA'
-$pgDes.Controls.Add((Novo-Botao "LIMPAR TEMPORARIOS`nTemp, cache de shaders, lixeira" { Limpar-Temporarios }))
+$pgDes.Controls.Add((Novo-Botao "LIMPAR TEMPORARIOS`nTemporarios (preserva cache de shaders e Lixeira)" { Limpar-Temporarios }))
 $pgDes.Controls.Add((Novo-Botao "PLANO ALTO DESEMPENHO`nAtiva o plano de energia maximo" { Ajustar-Energia }))
 $pgDes.Controls.Add((Novo-Botao "MODO JOGO DO WINDOWS`nAtiva e desliga captura de fundo" { Ajustar-ModoJogo }))
 Nova-Secao $pgDes 'MODO PERFORMANCE'
@@ -1302,7 +1347,7 @@ $script:Form.Add_FormClosing({
 
 $script:Form.Add_Shown({
     Log 'Sistema pronto. Escolha uma opcao no menu ou use EXECUTAR TUDO.' Green
-    if (-not $script:TemNvidia) { Log 'GPU NVIDIA nao detectada: uso e temperatura da GPU aparecem como N/D.' Gray }
+    if (-not $script:TemNvidia) { Log 'Leitura direta de GPU indisponivel: sem NVIDIA-SMI, uso e temperatura podem aparecer como N/D. A placa AMD/Intel continua utilizavel; esta versao ainda nao le sensores desses fabricantes.' Gray }
     try { Atualizar-Painel } catch { }
     $script:Timer.Start()
 })
