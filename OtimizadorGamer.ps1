@@ -78,9 +78,9 @@ $script:NavBotoes = New-Object System.Collections.ArrayList
 $script:Paginas = @{}
 
 $script:Paleta = @{
-    Fundo = '#0B0B12'; Lateral = '#0F0F1A'; Painel = '#14141F'; Hover = '#1E1E2E'
-    Neon = '#00FFA3'; Rosa = '#FF2E88'; Cian = '#00D9FF'; Amarelo = '#FFD60A'
-    Texto = '#E6E6F0'; Mudo = '#8A8AA0'
+    Fundo = '#06101F'; Lateral = '#08172A'; Painel = '#0B1D33'; Hover = '#102B49'
+    Neon = '#00E6A0'; Rosa = '#8B5CF6'; Cian = '#16B8FF'; Amarelo = '#FFB020'
+    Texto = '#EAF4FF'; Mudo = '#91A8C2'
 }
 
 # ============================================================
@@ -237,6 +237,65 @@ function Medir-Latencia {
     } catch { return $null }
 }
 
+
+function Diagnostico-RedeCompleto {
+    Log '--- Diagnostico de rede ---' Cyan
+    try {
+        $adaptadores = @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' })
+        if ($adaptadores.Count -eq 0) { Log 'Nenhum adaptador de rede ativo foi encontrado.' Yellow }
+        foreach ($a in $adaptadores) {
+            Log ("Adaptador ativo: {0} | {1} | velocidade {2}" -f $a.Name, $a.InterfaceDescription, $a.LinkSpeed) Green
+        }
+        $config = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.NetAdapter.Status -eq 'Up' })
+        foreach ($n in $config) {
+            Log ("IP: {0} | Gateway: {1} | DNS: {2}" -f ($n.IPv4Address.IPAddress -join ','), ($n.IPv4DefaultGateway.NextHop -join ','), ($n.DNSServer.ServerAddresses -join ',')) Cyan
+        }
+        foreach ($alvo in @('1.1.1.1','8.8.8.8')) {
+            $ms = Medir-Latencia $alvo
+            if ($null -eq $ms) { Log ("Ping {0}: sem resposta (pode haver bloqueio ICMP)" -f $alvo) Yellow }
+            else { Log ("Ping {0}: media {1} ms" -f $alvo,$ms) Green }
+        }
+        try {
+            $dns = Resolve-DnsName 'www.microsoft.com' -ErrorAction Stop | Select-Object -First 1
+            Log ("DNS: resolucao de www.microsoft.com respondeu ({0})" -f $dns.Name) Green
+        } catch { Log 'DNS: a consulta de nome falhou. Verifique conexao, DNS ou firewall.' Yellow }
+        Log 'O ping mede latencia ate o destino, nao mede diretamente o ping dentro do jogo.' Yellow
+    } catch { Log ("Falha no diagnostico de rede: {0}" -f $_.Exception.Message) Red }
+}
+
+function Recomendar-Armazenamento {
+    Log '--- Recomendacoes de armazenamento ---' Cyan
+    try {
+        $volumes = @(Get-Volume -ErrorAction Stop | Where-Object { $_.DriveLetter -and $_.Size -gt 0 })
+        foreach ($v in $volumes) {
+            $livrePct = [math]::Round(($v.SizeRemaining / $v.Size) * 100, 1)
+            $tipo = 'tipo nao identificado'
+            try {
+                $part = Get-Partition -DriveLetter $v.DriveLetter -ErrorAction Stop | Select-Object -First 1
+                $disk = Get-Disk -Number $part.DiskNumber -ErrorAction Stop
+                $phys = Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq $disk.FriendlyName } | Select-Object -First 1
+                if ($phys -and $phys.MediaType -ne 'Unspecified') { $tipo = [string]$phys.MediaType }
+            } catch { }
+            $livreGB = [math]::Round($v.SizeRemaining / 1GB, 1)
+            $msg = "Unidade $($v.DriveLetter): tipo $tipo; livre $livreGB GB ($livrePct%)."
+            if ($livrePct -lt 10) { Log ($msg + ' CRITICO: libere espaco com cuidado.') Red }
+            elseif ($livrePct -lt $script:LimiteEspacoLivre) { Log ($msg + ' Recomendacao: revisar arquivos grandes e temporarios.') Yellow }
+            else { Log $msg Green }
+            if ($tipo -eq 'SSD') { Log ("Unidade {0}: o Windows deve gerenciar TRIM; evite desfragmentacao manual repetida." -f $v.DriveLetter) Cyan }
+            elseif ($tipo -eq 'HDD') { Log ("Unidade {0}: a otimizacao do Windows pode desfragmentar quando apropriado." -f $v.DriveLetter) Cyan }
+        }
+    } catch { Log ("Nao foi possivel analisar volumes: {0}" -f $_.Exception.Message) Yellow }
+}
+
+function Abrir-Historico {
+    if (-not (Test-Path $script:LogFile)) {
+        Log 'Ainda nao existe arquivo de log para hoje.' Yellow
+        return
+    }
+    try { Start-Process notepad.exe -ArgumentList "`"$($script:LogFile)`"" }
+    catch { Log 'Nao foi possivel abrir o historico de atividades.' Red }
+}
+
 # ============================================================
 #  SEGURANCA
 # ============================================================
@@ -255,12 +314,29 @@ function Desfazer-Ajustes {
     Log '--- Desfazendo ajustes ---' Cyan
     if (-not (Test-Path $script:BackupFile)) { Log 'Nenhum backup encontrado.' Yellow; return }
     $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $falhaRestauracaoDNS = $false
     foreach ($p in $b.PSObject.Properties) {
         if ($p.Name -eq 'PlanoEnergia') {
             powercfg /setactive $p.Value 2>$null
             Log 'Plano de energia restaurado.'
         } elseif ($p.Name -eq 'DNSAlterado') {
-            Aplicar-DNS 'Automatico'
+            # Marcador legado: a restauracao real e feita pelas entradas DNSOriginal.
+            continue
+        } elseif ($p.Name -like 'DNSOriginal|*') {
+            try {
+                $dns = $p.Value
+                $indice = [int]$dns.InterfaceIndex
+                $servidores = @($dns.ServerAddresses | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+                if ($servidores.Count -gt 0) {
+                    Set-DnsClientServerAddress -InterfaceIndex $indice -ServerAddresses $servidores -ErrorAction Stop
+                } else {
+                    Set-DnsClientServerAddress -InterfaceIndex $indice -ResetServerAddresses -ErrorAction Stop
+                }
+                Log "DNS original restaurado: $($dns.InterfaceAlias)" Green
+            } catch {
+                $falhaRestauracaoDNS = $true
+                Log "Nao foi possivel restaurar o DNS ($($p.Name)): $($_.Exception.Message)" Yellow
+            }
         } elseif ($p.Name -like '*|*') {
             $partes = $p.Name -split '\|', 2
             $caminho = $partes[0]; $nome = $partes[1]
@@ -272,8 +348,94 @@ function Desfazer-Ajustes {
             Log "Restaurado: $nome"
         }
     }
-    Remove-Item $script:BackupFile -Force
-    Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    if ($falhaRestauracaoDNS) {
+        Log 'O backup foi mantido porque algum DNS nao foi restaurado. Corrija a conexao e tente DESFAZER novamente.' Yellow
+    } else {
+        Remove-Item $script:BackupFile -Force
+        Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    }
+}
+
+
+# ---------- Perfis reversiveis de desempenho ----------
+function Aplicar-Perfil {
+    param([ValidateSet('Equilibrado','Jogos','Economia')][string]$Perfil)
+    if (-not (Confirmar "Aplicar o perfil $Perfil? O plano de energia sera alterado e o anterior ficara salvo para restauracao.")) {
+        Log 'Aplicacao de perfil cancelada.' Yellow
+        return
+    }
+    $atual = Plano-Atual
+    if ($atual) { Salvar-Backup -Chave 'PlanoEnergia' -Valor $atual }
+    switch ($Perfil) {
+        'Jogos' {
+            $alvo = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -ne 0) { Log 'Plano Alto desempenho indisponivel; nenhum plano alternativo foi forcado.' Yellow; return }
+            Log 'Perfil Jogos aplicado. O consumo de energia pode aumentar.' Green
+        }
+        'Equilibrado' {
+            $alvo = '381b4222-f694-41f0-9685-ff5bb260df2e'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -eq 0) { Log 'Perfil Equilibrado aplicado.' Green } else { Log 'Nao foi possivel ativar o plano Equilibrado.' Yellow }
+        }
+        'Economia' {
+            $alvo = 'a1841308-3541-4fab-bc81-f71556f20b4a'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -eq 0) { Log 'Perfil Economia aplicado.' Green } else { Log 'Plano Economia indisponivel neste Windows.' Yellow }
+        }
+    }
+}
+
+function Mostrar-ResumoHardware {
+    Log '--- Resumo de hardware ---' Cyan
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
+        $discos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue)
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        Log ("Windows: {0} | build {1}" -f $os.Caption, $os.BuildNumber) Cyan
+        Log ("CPU: {0}" -f $cpu.Name) Green
+        Log ("RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB)) Green
+        foreach ($gpu in $gpus) { Log ("GPU: {0}" -f $gpu.Name) Green }
+        foreach ($d in $discos) { Log ("Disco: {0} | {1} | {2}" -f $d.FriendlyName, $d.MediaType, $d.HealthStatus) Green }
+        Log 'Temperaturas dependem do suporte do fabricante/driver; N/D nao significa defeito.' Yellow
+    } catch { Log "Falha ao ler hardware: $($_.Exception.Message)" Red }
+}
+
+function Abrir-GerenciadorInicializacao {
+    Log 'Abrindo ferramentas nativas. Nenhum aplicativo sera desativado automaticamente.' Cyan
+    try { Start-Process 'ms-settings:startupapps' -ErrorAction Stop }
+    catch {
+        try { Start-Process 'taskmgr.exe' -ErrorAction Stop; Log 'No Gerenciador de Tarefas, abra Aplicativos de inicializacao.' Yellow }
+        catch { Log 'Nao foi possivel abrir o gerenciador de inicializacao.' Red }
+    }
+}
+
+function Exportar-RelatorioSistema {
+    $destino = Join-Path $script:Pasta ("relatorio_sistema_{0}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        $gpu = @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name })
+        $discos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FriendlyName) | $($_.MediaType) | $($_.HealthStatus)" })
+        @(
+            'RELATORIO DO OTIMIZADOR GAMER',
+            "Data: $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')",
+            "Windows: $($os.Caption) (build $($os.BuildNumber))",
+            "CPU: $($cpu.Name)",
+            ("RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB)),
+            "Uso CPU agora: $(Uso-CPU)%",
+            "Uso RAM agora: $(Uso-RAM)%",
+            "GPU: $($gpu -join '; ')",
+            "Discos: $($discos -join '; ')",
+            '',
+            'Temperaturas e FPS dependem de ferramentas compativeis; nao sao estimados.'
+        ) | Set-Content -Path $destino -Encoding UTF8
+        Log "Relatorio exportado: $destino" Green
+        Start-Process notepad.exe -ArgumentList "`"$destino`""
+    } catch { Log "Falha ao exportar relatorio: $($_.Exception.Message)" Red }
 }
 
 # ============================================================
@@ -281,10 +443,14 @@ function Desfazer-Ajustes {
 # ============================================================
 function Limpar-Temporarios {
     Log '--- Limpeza de temporarios ---' Cyan
+    if (-not (Confirmar "A limpeza remove arquivos temporarios que podem estar em uso. Os caches de shaders e a Lixeira serao preservados para evitar recompilacao e perda de arquivos. Continuar?")) {
+        Log 'Limpeza cancelada pelo usuario.' Yellow
+        return
+    }
+    # Nao apagar caches de shaders: o Windows/jogos podem precisar recompila-los,
+    # causando travamentos temporarios depois da limpeza.
     $alvos = @(
-        $env:TEMP, "$env:SystemRoot\Temp",
-        "$env:LOCALAPPDATA\D3DSCache", "$env:LOCALAPPDATA\NVIDIA\DXCache",
-        "$env:LOCALAPPDATA\NVIDIA\GLCache", "$env:LOCALAPPDATA\AMD\DxCache"
+        $env:TEMP, "$env:SystemRoot\Temp"
     )
     $letra = $env:SystemDrive.TrimEnd(':')
     $livreAntes = (Get-PSDrive -Name $letra).Free
@@ -295,7 +461,7 @@ function Limpar-Temporarios {
             Log "Limpo: $a"
         }
     }
-    try { Clear-RecycleBin -Force -ErrorAction Stop; Log 'Lixeira esvaziada.' } catch { }
+    # A Lixeira e preservada intencionalmente; esvazia-la pode causar perda de dados.
     $livreDepois = (Get-PSDrive -Name $letra).Free
     $liberado = [math]::Round(($livreDepois - $livreAntes) / 1MB)
     Log "Espaco liberado: aproximadamente $liberado MB" Green
@@ -311,7 +477,12 @@ function Ajustar-Energia {
         $novo = powercfg -duplicatescheme $altoDesempenho 2>$null
         if ($novo -match '([0-9a-fA-F\-]{36})') { powercfg /setactive $Matches[1] }
     }
-    Log 'Plano Alto desempenho ativado.' Green
+    $planoFinal = Plano-Atual
+    if ($planoFinal -eq $altoDesempenho) {
+        Log 'Plano Alto desempenho ativado e confirmado.' Green
+    } else {
+        Log 'O Windows nao confirmou a ativacao do plano Alto desempenho. Mantendo o plano atual.' Yellow
+    }
 }
 
 function Ajustar-ModoJogo {
@@ -505,6 +676,21 @@ function Aplicar-DNS {
     $adaptadores = @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' })
     foreach ($a in $adaptadores) {
         try {
+            # Guarda a configuracao IPv4 original de cada adaptador apenas uma vez.
+            # Um array vazio significa DNS automatico/DHCP e tambem precisa ser restaurado.
+            if ($Opcao -ne 'Automatico') {
+                $chaveBackup = "DNSOriginal|$($a.ifIndex)"
+                if ($null -eq (Ler-Backup $chaveBackup)) {
+                    $dnsOriginal = @(Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -ExpandProperty ServerAddresses)
+                    Salvar-Backup -Chave $chaveBackup -Valor ([pscustomobject]@{
+                        InterfaceIndex = [int]$a.ifIndex
+                        InterfaceAlias = [string]$a.Name
+                        ServerAddresses = @($dnsOriginal)
+                    })
+                }
+            }
+
             if ($Opcao -eq 'Cloudflare') {
                 Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @('1.1.1.1', '1.0.0.1') -ErrorAction Stop
             } elseif ($Opcao -eq 'Google') {
@@ -884,9 +1070,9 @@ function Novo-Botao {
 function Novo-Card {
     param([string]$Titulo, [string]$CorHex)
     $p = New-Object System.Windows.Forms.Panel
-    $p.Size = New-Object System.Drawing.Size(152, 88)
+    $p.Size = New-Object System.Drawing.Size(174, 104)
     $p.BackColor = (ParaCor $script:Paleta.Painel)
-    $p.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 14)
+    $p.Margin = New-Object System.Windows.Forms.Padding(0, 0, 16, 16)
 
     $linha = New-Object System.Windows.Forms.Panel
     $linha.Dock = 'Bottom'; $linha.Height = 3
@@ -897,14 +1083,14 @@ function Novo-Card {
     $t.Text = $Titulo; $t.AutoSize = $true
     $t.Font = (Fonte 'Segoe UI' 8.5 'Bold')
     $t.ForeColor = (ParaCor $script:Paleta.Mudo)
-    $t.Location = New-Object System.Drawing.Point(12, 10)
+    $t.Location = New-Object System.Drawing.Point(14, 12)
     $p.Controls.Add($t)
 
     $v = New-Object System.Windows.Forms.Label
     $v.Text = '--'; $v.AutoSize = $true
-    $v.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+    $v.Font = (Fonte 'Segoe UI Black' 19 'Regular')
     $v.ForeColor = (ParaCor $CorHex)
-    $v.Location = New-Object System.Drawing.Point(10, 36)
+    $v.Location = New-Object System.Drawing.Point(13, 43)
     $p.Controls.Add($v)
 
     return @{ Painel = $p; Valor = $v }
@@ -915,7 +1101,7 @@ function Nova-Pagina {
     $p = New-Object System.Windows.Forms.FlowLayoutPanel
     $p.Dock = 'Fill'
     $p.AutoScroll = $true
-    $p.Padding = New-Object System.Windows.Forms.Padding(24, 18, 12, 12)
+    $p.Padding = New-Object System.Windows.Forms.Padding(26, 22, 18, 18)
     $p.BackColor = (ParaCor $script:Paleta.Fundo)
     $p.Visible = $false
     $t = Novo-Label $Titulo 22 $script:Paleta.Neon 'Segoe UI Black' 'Regular'
@@ -951,8 +1137,8 @@ function Mostrar-Pagina {
 # ---------- Janela principal ----------
 $script:Form = New-Object System.Windows.Forms.Form
 $script:Form.Text = 'Otimizador Gamer'
-$script:Form.Size = New-Object System.Drawing.Size(1120, 780)
-$script:Form.MinimumSize = New-Object System.Drawing.Size(1000, 700)
+$script:Form.Size = New-Object System.Drawing.Size(1420, 900)
+$script:Form.MinimumSize = New-Object System.Drawing.Size(1180, 760)
 $script:Form.StartPosition = 'CenterScreen'
 $script:Form.BackColor = (ParaCor $script:Paleta.Fundo)
 $script:Form.ForeColor = (ParaCor $script:Paleta.Texto)
@@ -965,13 +1151,13 @@ $script:Form.Controls.Add($script:Conteudo)
 
 # Barra lateral
 $lateral = New-Object System.Windows.Forms.Panel
-$lateral.Dock = 'Left'; $lateral.Width = 214
+$lateral.Dock = 'Left'; $lateral.Width = 228
 $lateral.BackColor = (ParaCor $script:Paleta.Lateral)
 $script:Form.Controls.Add($lateral)
 
 # Console (parte de baixo)
 $rodape = New-Object System.Windows.Forms.Panel
-$rodape.Dock = 'Bottom'; $rodape.Height = 230
+$rodape.Dock = 'Bottom'; $rodape.Height = 154
 $rodape.BackColor = (ParaCor '#07070C')
 $script:Form.Controls.Add($rodape)
 
@@ -995,7 +1181,7 @@ $rodape.Controls.Add($script:BarraFundo)
 
 # Cabecalho
 $cabecalho = New-Object System.Windows.Forms.Panel
-$cabecalho.Dock = 'Top'; $cabecalho.Height = 78
+$cabecalho.Dock = 'Top'; $cabecalho.Height = 86
 $cabecalho.BackColor = (ParaCor $script:Paleta.Lateral)
 $neonLinha = New-Object System.Windows.Forms.Panel
 $neonLinha.Dock = 'Bottom'; $neonLinha.Height = 2
@@ -1003,19 +1189,19 @@ $neonLinha.BackColor = (ParaCor $script:Paleta.Neon)
 $cabecalho.Controls.Add($neonLinha)
 
 $lblTitulo = New-Object System.Windows.Forms.Label
-$lblTitulo.Text = [string][char]0x26A1 + ' OTIMIZADOR GAMER'
+$lblTitulo.Text = [string][char]0x25C8 + '  OTIMIZADOR GAMER'
 $lblTitulo.AutoSize = $true
-$lblTitulo.Font = (Fonte 'Segoe UI Black' 24 'Regular')
+$lblTitulo.Font = (Fonte 'Segoe UI Black' 25 'Regular')
 $lblTitulo.ForeColor = (ParaCor $script:Paleta.Neon)
-$lblTitulo.Location = New-Object System.Drawing.Point(18, 6)
+$lblTitulo.Location = New-Object System.Drawing.Point(24, 7)
 $cabecalho.Controls.Add($lblTitulo)
 
 $lblSub = New-Object System.Windows.Forms.Label
-$lblSub.Text = 'PERFORMANCE MAXIMA  ' + [char]0x2022 + '  DISCO  ' + [char]0x2022 + '  REDE  ' + [char]0x2022 + '  JOGOS'
+$lblSub.Text = 'PAINEL DE CONTROLE  ' + [char]0x2022 + '  DESEMPENHO  ' + [char]0x2022 + '  DIAGNOSTICOS'
 $lblSub.AutoSize = $true
 $lblSub.Font = (Fonte 'Segoe UI' 8.5 'Bold')
 $lblSub.ForeColor = (ParaCor $script:Paleta.Cian)
-$lblSub.Location = New-Object System.Drawing.Point(24, 54)
+$lblSub.Location = New-Object System.Drawing.Point(31, 58)
 $cabecalho.Controls.Add($lblSub)
 $script:Form.Controls.Add($cabecalho)
 
@@ -1030,34 +1216,60 @@ foreach ($it in $itensNav) {
     $nb.Text = $it[1]
     $nb.Tag = $it[0]
     $nb.Location = New-Object System.Drawing.Point(0, $y)
-    $nb.Size = New-Object System.Drawing.Size(214, 50)
+    $nb.Size = New-Object System.Drawing.Size(228, 52)
     $nb.FlatStyle = 'Flat'
     $nb.FlatAppearance.BorderSize = 0
     $nb.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
     $nb.BackColor = (ParaCor $script:Paleta.Lateral)
     $nb.ForeColor = (ParaCor $script:Paleta.Texto)
-    $nb.Font = (Fonte 'Segoe UI' 10.5 'Bold')
+    $nb.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
     $nb.TextAlign = 'MiddleLeft'
-    $nb.Padding = New-Object System.Windows.Forms.Padding(24, 0, 0, 0)
+    $nb.Padding = New-Object System.Windows.Forms.Padding(20, 0, 0, 0)
     $nb.Cursor = [System.Windows.Forms.Cursors]::Hand
     $nb.Add_Click({ param($s, $e) Mostrar-Pagina $s.Tag })
     $lateral.Controls.Add($nb)
     [void]$script:NavBotoes.Add($nb)
-    $y += 54
+    $y += 56
 }
 $lblVersao = New-Object System.Windows.Forms.Label
-$lblVersao.Text = 'v2.0  |  modo administrador'
+$lblVersao.Text = 'OTIMIZADOR GAMER  |  v2.0'
 $lblVersao.AutoSize = $true
 $lblVersao.Font = (Fonte 'Segoe UI' 8 'Regular')
 $lblVersao.ForeColor = (ParaCor $script:Paleta.Mudo)
-$lblVersao.Location = New-Object System.Drawing.Point(24, 420)
+$lblVersao.Location = New-Object System.Drawing.Point(20, 458)
 $lateral.Controls.Add($lblVersao)
 
 # ---------- Pagina: PAINEL ----------
-$pgInicio = Nova-Pagina 'inicio' 'PAINEL' 'Visao geral do seu PC em tempo real. Tudo que altera o sistema tem backup e pode ser desfeito.'
+$pgInicio = Nova-Pagina 'inicio' 'PAINEL DE CONTROLE' 'Acompanhe o computador, execute manutencoes seguras e ajuste o desempenho sem perder o controle.'
+
+# Banner principal do dashboard: visual informativo, sem inventar telemetria.
+$bannerInicio = New-Object System.Windows.Forms.Panel
+$bannerInicio.Size = New-Object System.Drawing.Size(820, 82)
+$bannerInicio.BackColor = (ParaCor '#0B2540')
+$bannerInicio.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 18)
+$faixaBanner = New-Object System.Windows.Forms.Panel
+$faixaBanner.Dock = 'Left'; $faixaBanner.Width = 5
+$faixaBanner.BackColor = (ParaCor $script:Paleta.Cian)
+$bannerInicio.Controls.Add($faixaBanner)
+$bannerTitulo = New-Object System.Windows.Forms.Label
+$bannerTitulo.Text = 'SEU SETUP, SOB CONTROLE'
+$bannerTitulo.AutoSize = $true
+$bannerTitulo.Font = (Fonte 'Segoe UI Semibold' 15 'Bold')
+$bannerTitulo.ForeColor = (ParaCor $script:Paleta.Texto)
+$bannerTitulo.Location = New-Object System.Drawing.Point(22, 13)
+$bannerInicio.Controls.Add($bannerTitulo)
+$bannerTexto = New-Object System.Windows.Forms.Label
+$bannerTexto.Text = 'Ferramentas de desempenho, diagnostico e manutencao em um so lugar.'
+$bannerTexto.AutoSize = $true
+$bannerTexto.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+$bannerTexto.ForeColor = (ParaCor $script:Paleta.Mudo)
+$bannerTexto.Location = New-Object System.Drawing.Point(23, 46)
+$bannerInicio.Controls.Add($bannerTexto)
+$pgInicio.Controls.Add($bannerInicio)
+$pgInicio.SetFlowBreak($bannerInicio, $true)
 $script:CardCPU   = Novo-Card 'CPU' $script:Paleta.Neon
 $script:CardRAM   = Novo-Card 'MEMORIA RAM' $script:Paleta.Cian
-$script:CardGPU   = Novo-Card 'GPU (NVIDIA)' $script:Paleta.Rosa
+$script:CardGPU   = Novo-Card 'GPU (AMD/NVIDIA)' $script:Paleta.Rosa
 $script:CardTemp  = Novo-Card 'TEMP CPU / GPU' $script:Paleta.Amarelo
 $script:CardDisco = Novo-Card 'LIVRE NO SISTEMA' $script:Paleta.Neon
 foreach ($c in @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:CardTemp, $script:CardDisco)) {
@@ -1065,7 +1277,7 @@ foreach ($c in @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:Card
 }
 $pgInicio.SetFlowBreak($script:CardDisco.Painel, $true)
 
-$btnTudo = Novo-Botao "EXECUTAR TUDO (RECOMENDADO)`nLimpeza, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 538 74
+$btnTudo = Novo-Botao "EXECUTAR MANUTENCAO RECOMENDADA`nLimpeza segura, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 610 82
 $pgInicio.Controls.Add($btnTudo)
 $pgInicio.SetFlowBreak($btnTudo, $true)
 $pgInicio.Controls.Add((Novo-Botao "PONTO DE RESTAURACAO`nCria um ponto antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
@@ -1074,7 +1286,7 @@ $pgInicio.Controls.Add((Novo-Botao "DESFAZER AJUSTES`nVolta registro, energia e 
 # ---------- Pagina: DESEMPENHO ----------
 $pgDes = Nova-Pagina 'desempenho' 'DESEMPENHO' 'Limpeza, energia, modo jogo e ajustes do sistema para ganhar FPS e estabilidade.'
 Nova-Secao $pgDes 'LIMPEZA E ENERGIA'
-$pgDes.Controls.Add((Novo-Botao "LIMPAR TEMPORARIOS`nTemp, cache de shaders, lixeira" { Limpar-Temporarios }))
+$pgDes.Controls.Add((Novo-Botao "LIMPAR TEMPORARIOS`nTemporarios (preserva cache de shaders e Lixeira)" { Limpar-Temporarios }))
 $pgDes.Controls.Add((Novo-Botao "PLANO ALTO DESEMPENHO`nAtiva o plano de energia maximo" { Ajustar-Energia }))
 $pgDes.Controls.Add((Novo-Botao "MODO JOGO DO WINDOWS`nAtiva e desliga captura de fundo" { Ajustar-ModoJogo }))
 Nova-Secao $pgDes 'MODO PERFORMANCE'
@@ -1087,11 +1299,19 @@ $pgDes.Controls.Add((Novo-Botao "GPU E EFEITOS VISUAIS`nHAGS, menos animacoes e 
 $pgDes.Controls.Add((Novo-Botao "HORARIO ATIVO DO UPDATE`nEvita reinicio enquanto voce joga" { Definir-HorarioAtivo } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "APPS DE INICIALIZACAO`nLista o que abre com o Windows" { Listar-Inicializacao } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "REMOVER BLOATWARE`nEscolha apps inuteis para remover" { Remover-Bloatware } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'PERFIS RAPIDOS'
+$pgDes.Controls.Add((Novo-Botao "PERFIL JOGOS`nAlto desempenho quando disponivel" { Aplicar-Perfil 'Jogos' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "PERFIL EQUILIBRADO`nUso diario e consumo moderado" { Aplicar-Perfil 'Equilibrado' } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "PERFIL ECONOMIA`nReduz consumo quando disponivel" { Aplicar-Perfil 'Economia' } $script:Paleta.Amarelo))
+$pgDes.Controls.Add((Novo-Botao "INICIALIZACAO DO WINDOWS`nGerencie apps nas ferramentas nativas" { Abrir-GerenciadorInicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "LISTAR APPS DE INICIALIZACAO`nMostra os itens que iniciam com o Windows" { Listar-Inicializacao } $script:Paleta.Neon))
+$pgDes.Controls.Add((Novo-Botao "RESUMO DE HARDWARE`nCPU, RAM, GPU e discos detectados" { Mostrar-ResumoHardware } $script:Paleta.Neon))
 
 # ---------- Pagina: DISCO ----------
 $pgDisco = Nova-Pagina 'disco' 'DISCO' 'Saude, verificacao, otimizacao e velocidade. TRIM em SSD e desfragmentacao apenas em HDD.'
 Nova-Secao $pgDisco 'DIAGNOSTICO'
 $pgDisco.Controls.Add((Novo-Botao "SAUDE E ESPACO`nSMART, temperatura, desgaste" { Saude-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "RECOMENDACOES POR UNIDADE`nEspaco livre e tipo SSD/HDD quando detectado" { Recomendar-Armazenamento } $script:Paleta.Cian))
 $pgDisco.Controls.Add((Novo-Botao "VERIFICAR ERROS`nVarredura somente leitura" { Verificar-Disco }))
 $pgDisco.Controls.Add((Novo-Botao "BENCHMARK DO DISCO`nVelocidade de leitura e escrita" { Benchmark-Disco }))
 Nova-Secao $pgDisco 'OTIMIZACAO E REPARO'
@@ -1102,6 +1322,7 @@ $pgDisco.Controls.Add((Novo-Botao "ARQUIVOS DO WINDOWS (SFC)`nVerifica a integri
 # ---------- Pagina: REDE ----------
 $pgRede = Nova-Pagina 'rede' 'REDE' 'Limpe o cache DNS, teste a latencia e escolha um DNS mais rapido.'
 $pgRede.Controls.Add((Novo-Botao "LIMPAR DNS E TESTAR PING`nLatencia para 1.1.1.1 e 8.8.8.8" { Otimizar-Rede }))
+$pgRede.Controls.Add((Novo-Botao "DIAGNOSTICO COMPLETO`nAdaptadores, IP, gateway, DNS e conectividade" { Diagnostico-RedeCompleto } $script:Paleta.Neon))
 $pgRede.SetFlowBreak($pgRede.Controls[$pgRede.Controls.Count - 1], $true)
 Nova-Secao $pgRede 'SERVIDOR DNS'
 $script:ComboDns = New-Object System.Windows.Forms.ComboBox
@@ -1256,6 +1477,8 @@ $pgAg = Nova-Pagina 'agenda' 'AGENDAR E RELATORIOS' 'Manutencao automatica seman
 $pgAg.Controls.Add((Novo-Botao "AGENDAR MANUTENCAO SEMANAL`nDomingo as 04:00 (roda ao ligar se perdeu)" { Agendar-Manutencao }))
 $pgAg.Controls.Add((Novo-Botao "REMOVER AGENDAMENTO`nCancela a manutencao automatica" { Remover-Agendamento } $script:Paleta.Rosa))
 $pgAg.Controls.Add((Novo-Botao "ABRIR PASTA DE LOGS`nLogs e relatorios antes/depois" { Start-Process explorer.exe -ArgumentList "`"$($script:Pasta)`"" } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "EXPORTAR RELATORIO DO PC`nGera arquivo com hardware e uso atual" { Exportar-RelatorioSistema } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "ABRIR HISTORICO DE ATIVIDADES`nConsulte as operacoes registradas hoje" { Abrir-Historico } $script:Paleta.Cian))
 
 # ---------- Eventos de opcoes ----------
 $script:ChkAuto.Add_CheckedChanged({ Salvar-Config })
@@ -1301,8 +1524,8 @@ $script:Form.Add_FormClosing({
 })
 
 $script:Form.Add_Shown({
-    Log 'Sistema pronto. Escolha uma opcao no menu ou use EXECUTAR TUDO.' Green
-    if (-not $script:TemNvidia) { Log 'GPU NVIDIA nao detectada: uso e temperatura da GPU aparecem como N/D.' Gray }
+    Log 'Sistema pronto. Escolha uma area no menu ou execute a manutencao recomendada.' Green
+    if (-not $script:TemNvidia) { Log 'Leitura direta de GPU indisponivel: sem NVIDIA-SMI, uso e temperatura podem aparecer como N/D. A placa AMD/Intel continua utilizavel; esta versao ainda nao le sensores desses fabricantes.' Gray }
     try { Atualizar-Painel } catch { }
     $script:Timer.Start()
 })
