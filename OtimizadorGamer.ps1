@@ -237,6 +237,64 @@ function Medir-Latencia {
     } catch { return $null }
 }
 
+
+function Diagnostico-RedeCompleto {
+    Log '--- Diagnostico de rede ---' Cyan
+    try {
+        $adaptadores = @(Get-NetAdapter -ErrorAction Stop | Where-Object { $_.Status -eq 'Up' })
+        if ($adaptadores.Count -eq 0) { Log 'Nenhum adaptador de rede ativo foi encontrado.' Yellow }
+        foreach ($a in $adaptadores) {
+            Log ("Adaptador ativo: {0} | {1} | velocidade {2}" -f $a.Name, $a.InterfaceDescription, $a.LinkSpeed) Green
+        }
+        $config = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.NetAdapter.Status -eq 'Up' })
+        foreach ($n in $config) {
+            Log ("IP: {0} | Gateway: {1} | DNS: {2}" -f ($n.IPv4Address.IPAddress -join ','), ($n.IPv4DefaultGateway.NextHop -join ','), ($n.DNSServer.ServerAddresses -join ',')) Cyan
+        }
+        foreach ($alvo in @('1.1.1.1','8.8.8.8')) {
+            $ms = Medir-Latencia $alvo
+            if ($null -eq $ms) { Log ("Ping {0}: sem resposta (pode haver bloqueio ICMP)" -f $alvo) Yellow }
+            else { Log ("Ping {0}: media {1} ms" -f $alvo,$ms) Green }
+        }
+        try {
+            $dns = Resolve-DnsName 'www.microsoft.com' -ErrorAction Stop | Select-Object -First 1
+            Log ("DNS: resolucao de www.microsoft.com respondeu ({0})" -f $dns.Name) Green
+        } catch { Log 'DNS: a consulta de nome falhou. Verifique conexao, DNS ou firewall.' Yellow }
+        Log 'O ping mede latencia ate o destino, nao mede diretamente o ping dentro do jogo.' Yellow
+    } catch { Log ("Falha no diagnostico de rede: {0}" -f $_.Exception.Message) Red }
+}
+
+function Recomendar-Armazenamento {
+    Log '--- Recomendacoes de armazenamento ---' Cyan
+    try {
+        $volumes = @(Get-Volume -ErrorAction Stop | Where-Object { $_.DriveLetter -and $_.Size -gt 0 })
+        foreach ($v in $volumes) {
+            $livrePct = [math]::Round(($v.SizeRemaining / $v.Size) * 100, 1)
+            $tipo = 'tipo nao identificado'
+            try {
+                $part = Get-Partition -DriveLetter $v.DriveLetter -ErrorAction Stop | Select-Object -First 1
+                $disk = Get-Disk -Number $part.DiskNumber -ErrorAction Stop
+                $phys = Get-PhysicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -eq $disk.FriendlyName } | Select-Object -First 1
+                if ($phys -and $phys.MediaType -ne 'Unspecified') { $tipo = [string]$phys.MediaType }
+            } catch { }
+            $msg = "Unidade $($v.DriveLetter): tipo $tipo; livre $($v.SizeRemaining / 1GB -as [double] -as [string]) GB ($livrePct%)."
+            if ($livrePct -lt 10) { Log ($msg + ' CRITICO: libere espaco com cuidado.') Red }
+            elseif ($livrePct -lt $script:LimiteEspacoLivre) { Log ($msg + ' Recomendacao: revisar arquivos grandes e temporarios.') Yellow }
+            else { Log $msg Green }
+            if ($tipo -eq 'SSD') { Log ("Unidade {0}: o Windows deve gerenciar TRIM; evite desfragmentacao manual repetida." -f $v.DriveLetter) Cyan }
+            elseif ($tipo -eq 'HDD') { Log ("Unidade {0}: a otimizacao do Windows pode desfragmentar quando apropriado." -f $v.DriveLetter) Cyan }
+        }
+    } catch { Log ("Nao foi possivel analisar volumes: {0}" -f $_.Exception.Message) Yellow }
+}
+
+function Abrir-Historico {
+    if (-not (Test-Path $script:LogFile)) {
+        Log 'Ainda nao existe arquivo de log para hoje.' Yellow
+        return
+    }
+    try { Start-Process notepad.exe -ArgumentList "`"$($script:LogFile)`"" }
+    catch { Log 'Nao foi possivel abrir o historico de atividades.' Red }
+}
+
 # ============================================================
 #  SEGURANCA
 # ============================================================
@@ -1225,6 +1283,7 @@ $pgDes.Controls.Add((Novo-Botao "RESUMO DE HARDWARE`nCPU, RAM, GPU e discos dete
 $pgDisco = Nova-Pagina 'disco' 'DISCO' 'Saude, verificacao, otimizacao e velocidade. TRIM em SSD e desfragmentacao apenas em HDD.'
 Nova-Secao $pgDisco 'DIAGNOSTICO'
 $pgDisco.Controls.Add((Novo-Botao "SAUDE E ESPACO`nSMART, temperatura, desgaste" { Saude-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "RECOMENDACOES POR UNIDADE`nEspaco livre e tipo SSD/HDD quando detectado" { Recomendar-Armazenamento } $script:Paleta.Cian))
 $pgDisco.Controls.Add((Novo-Botao "VERIFICAR ERROS`nVarredura somente leitura" { Verificar-Disco }))
 $pgDisco.Controls.Add((Novo-Botao "BENCHMARK DO DISCO`nVelocidade de leitura e escrita" { Benchmark-Disco }))
 Nova-Secao $pgDisco 'OTIMIZACAO E REPARO'
@@ -1235,6 +1294,7 @@ $pgDisco.Controls.Add((Novo-Botao "ARQUIVOS DO WINDOWS (SFC)`nVerifica a integri
 # ---------- Pagina: REDE ----------
 $pgRede = Nova-Pagina 'rede' 'REDE' 'Limpe o cache DNS, teste a latencia e escolha um DNS mais rapido.'
 $pgRede.Controls.Add((Novo-Botao "LIMPAR DNS E TESTAR PING`nLatencia para 1.1.1.1 e 8.8.8.8" { Otimizar-Rede }))
+$pgRede.Controls.Add((Novo-Botao "DIAGNOSTICO COMPLETO`nAdaptadores, IP, gateway, DNS e conectividade" { Diagnostico-RedeCompleto } $script:Paleta.Neon))
 $pgRede.SetFlowBreak($pgRede.Controls[$pgRede.Controls.Count - 1], $true)
 Nova-Secao $pgRede 'SERVIDOR DNS'
 $script:ComboDns = New-Object System.Windows.Forms.ComboBox
@@ -1390,6 +1450,7 @@ $pgAg.Controls.Add((Novo-Botao "AGENDAR MANUTENCAO SEMANAL`nDomingo as 04:00 (ro
 $pgAg.Controls.Add((Novo-Botao "REMOVER AGENDAMENTO`nCancela a manutencao automatica" { Remover-Agendamento } $script:Paleta.Rosa))
 $pgAg.Controls.Add((Novo-Botao "ABRIR PASTA DE LOGS`nLogs e relatorios antes/depois" { Start-Process explorer.exe -ArgumentList "`"$($script:Pasta)`"" } $script:Paleta.Cian))
 $pgAg.Controls.Add((Novo-Botao "EXPORTAR RELATORIO DO PC`nGera arquivo com hardware e uso atual" { Exportar-RelatorioSistema } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "ABRIR HISTORICO DE ATIVIDADES`nConsulte as operacoes registradas hoje" { Abrir-Historico } $script:Paleta.Cian))
 
 # ---------- Eventos de opcoes ----------
 $script:ChkAuto.Add_CheckedChanged({ Salvar-Config })
