@@ -255,6 +255,7 @@ function Desfazer-Ajustes {
     Log '--- Desfazendo ajustes ---' Cyan
     if (-not (Test-Path $script:BackupFile)) { Log 'Nenhum backup encontrado.' Yellow; return }
     $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $falhaRestauracaoDNS = $false
     foreach ($p in $b.PSObject.Properties) {
         if ($p.Name -eq 'PlanoEnergia') {
             powercfg /setactive $p.Value 2>$null
@@ -274,6 +275,7 @@ function Desfazer-Ajustes {
                 }
                 Log "DNS original restaurado: $($dns.InterfaceAlias)" Green
             } catch {
+                $falhaRestauracaoDNS = $true
                 Log "Nao foi possivel restaurar o DNS ($($p.Name)): $($_.Exception.Message)" Yellow
             }
         } elseif ($p.Name -like '*|*') {
@@ -287,8 +289,12 @@ function Desfazer-Ajustes {
             Log "Restaurado: $nome"
         }
     }
-    Remove-Item $script:BackupFile -Force
-    Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    if ($falhaRestauracaoDNS) {
+        Log 'O backup foi mantido porque algum DNS nao foi restaurado. Corrija a conexao e tente DESFAZER novamente.' Yellow
+    } else {
+        Remove-Item $script:BackupFile -Force
+        Log 'Ajustes revertidos. Reinicie o PC para concluir.' Green
+    }
 }
 
 # ============================================================
