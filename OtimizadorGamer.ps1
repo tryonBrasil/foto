@@ -78,9 +78,9 @@ $script:NavBotoes = New-Object System.Collections.ArrayList
 $script:Paginas = @{}
 
 $script:Paleta = @{
-    Fundo = '#0B0B12'; Lateral = '#0F0F1A'; Painel = '#14141F'; Hover = '#1E1E2E'
-    Neon = '#00FFA3'; Rosa = '#FF2E88'; Cian = '#00D9FF'; Amarelo = '#FFD60A'
-    Texto = '#E6E6F0'; Mudo = '#8A8AA0'
+    Fundo = '#06101F'; Lateral = '#08172A'; Painel = '#0B1D33'; Hover = '#102B49'
+    Neon = '#00E6A0'; Rosa = '#8B5CF6'; Cian = '#16B8FF'; Amarelo = '#FFB020'
+    Texto = '#EAF4FF'; Mudo = '#91A8C2'
 }
 
 # ============================================================
@@ -1070,9 +1070,9 @@ function Novo-Botao {
 function Novo-Card {
     param([string]$Titulo, [string]$CorHex)
     $p = New-Object System.Windows.Forms.Panel
-    $p.Size = New-Object System.Drawing.Size(152, 88)
+    $p.Size = New-Object System.Drawing.Size(174, 104)
     $p.BackColor = (ParaCor $script:Paleta.Painel)
-    $p.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 14)
+    $p.Margin = New-Object System.Windows.Forms.Padding(0, 0, 16, 16)
 
     $linha = New-Object System.Windows.Forms.Panel
     $linha.Dock = 'Bottom'; $linha.Height = 3
@@ -1083,14 +1083,14 @@ function Novo-Card {
     $t.Text = $Titulo; $t.AutoSize = $true
     $t.Font = (Fonte 'Segoe UI' 8.5 'Bold')
     $t.ForeColor = (ParaCor $script:Paleta.Mudo)
-    $t.Location = New-Object System.Drawing.Point(12, 10)
+    $t.Location = New-Object System.Drawing.Point(14, 12)
     $p.Controls.Add($t)
 
     $v = New-Object System.Windows.Forms.Label
     $v.Text = '--'; $v.AutoSize = $true
-    $v.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+    $v.Font = (Fonte 'Segoe UI Black' 19 'Regular')
     $v.ForeColor = (ParaCor $CorHex)
-    $v.Location = New-Object System.Drawing.Point(10, 36)
+    $v.Location = New-Object System.Drawing.Point(13, 43)
     $p.Controls.Add($v)
 
     return @{ Painel = $p; Valor = $v }
@@ -1101,7 +1101,7 @@ function Nova-Pagina {
     $p = New-Object System.Windows.Forms.FlowLayoutPanel
     $p.Dock = 'Fill'
     $p.AutoScroll = $true
-    $p.Padding = New-Object System.Windows.Forms.Padding(24, 18, 12, 12)
+    $p.Padding = New-Object System.Windows.Forms.Padding(26, 22, 18, 18)
     $p.BackColor = (ParaCor $script:Paleta.Fundo)
     $p.Visible = $false
     $t = Novo-Label $Titulo 22 $script:Paleta.Neon 'Segoe UI Black' 'Regular'
@@ -1137,8 +1137,8 @@ function Mostrar-Pagina {
 # ---------- Janela principal ----------
 $script:Form = New-Object System.Windows.Forms.Form
 $script:Form.Text = 'Otimizador Gamer'
-$script:Form.Size = New-Object System.Drawing.Size(1120, 780)
-$script:Form.MinimumSize = New-Object System.Drawing.Size(1000, 700)
+$script:Form.Size = New-Object System.Drawing.Size(1420, 900)
+$script:Form.MinimumSize = New-Object System.Drawing.Size(1180, 760)
 $script:Form.StartPosition = 'CenterScreen'
 $script:Form.BackColor = (ParaCor $script:Paleta.Fundo)
 $script:Form.ForeColor = (ParaCor $script:Paleta.Texto)
@@ -1151,13 +1151,13 @@ $script:Form.Controls.Add($script:Conteudo)
 
 # Barra lateral
 $lateral = New-Object System.Windows.Forms.Panel
-$lateral.Dock = 'Left'; $lateral.Width = 214
+$lateral.Dock = 'Left'; $lateral.Width = 228
 $lateral.BackColor = (ParaCor $script:Paleta.Lateral)
 $script:Form.Controls.Add($lateral)
 
 # Console (parte de baixo)
 $rodape = New-Object System.Windows.Forms.Panel
-$rodape.Dock = 'Bottom'; $rodape.Height = 230
+$rodape.Dock = 'Bottom'; $rodape.Height = 154
 $rodape.BackColor = (ParaCor '#07070C')
 $script:Form.Controls.Add($rodape)
 
@@ -1181,7 +1181,7 @@ $rodape.Controls.Add($script:BarraFundo)
 
 # Cabecalho
 $cabecalho = New-Object System.Windows.Forms.Panel
-$cabecalho.Dock = 'Top'; $cabecalho.Height = 78
+$cabecalho.Dock = 'Top'; $cabecalho.Height = 86
 $cabecalho.BackColor = (ParaCor $script:Paleta.Lateral)
 $neonLinha = New-Object System.Windows.Forms.Panel
 $neonLinha.Dock = 'Bottom'; $neonLinha.Height = 2
@@ -1189,19 +1189,19 @@ $neonLinha.BackColor = (ParaCor $script:Paleta.Neon)
 $cabecalho.Controls.Add($neonLinha)
 
 $lblTitulo = New-Object System.Windows.Forms.Label
-$lblTitulo.Text = [string][char]0x26A1 + ' OTIMIZADOR GAMER'
+$lblTitulo.Text = [string][char]0x25C8 + '  OTIMIZADOR GAMER'
 $lblTitulo.AutoSize = $true
-$lblTitulo.Font = (Fonte 'Segoe UI Black' 24 'Regular')
+$lblTitulo.Font = (Fonte 'Segoe UI Black' 25 'Regular')
 $lblTitulo.ForeColor = (ParaCor $script:Paleta.Neon)
-$lblTitulo.Location = New-Object System.Drawing.Point(18, 6)
+$lblTitulo.Location = New-Object System.Drawing.Point(24, 7)
 $cabecalho.Controls.Add($lblTitulo)
 
 $lblSub = New-Object System.Windows.Forms.Label
-$lblSub.Text = 'PERFORMANCE MAXIMA  ' + [char]0x2022 + '  DISCO  ' + [char]0x2022 + '  REDE  ' + [char]0x2022 + '  JOGOS'
+$lblSub.Text = 'PAINEL DE CONTROLE  ' + [char]0x2022 + '  DESEMPENHO  ' + [char]0x2022 + '  DIAGNOSTICOS'
 $lblSub.AutoSize = $true
 $lblSub.Font = (Fonte 'Segoe UI' 8.5 'Bold')
 $lblSub.ForeColor = (ParaCor $script:Paleta.Cian)
-$lblSub.Location = New-Object System.Drawing.Point(24, 54)
+$lblSub.Location = New-Object System.Drawing.Point(31, 58)
 $cabecalho.Controls.Add($lblSub)
 $script:Form.Controls.Add($cabecalho)
 
@@ -1216,27 +1216,27 @@ foreach ($it in $itensNav) {
     $nb.Text = $it[1]
     $nb.Tag = $it[0]
     $nb.Location = New-Object System.Drawing.Point(0, $y)
-    $nb.Size = New-Object System.Drawing.Size(214, 50)
+    $nb.Size = New-Object System.Drawing.Size(228, 52)
     $nb.FlatStyle = 'Flat'
     $nb.FlatAppearance.BorderSize = 0
     $nb.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
     $nb.BackColor = (ParaCor $script:Paleta.Lateral)
     $nb.ForeColor = (ParaCor $script:Paleta.Texto)
-    $nb.Font = (Fonte 'Segoe UI' 10.5 'Bold')
+    $nb.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
     $nb.TextAlign = 'MiddleLeft'
-    $nb.Padding = New-Object System.Windows.Forms.Padding(24, 0, 0, 0)
+    $nb.Padding = New-Object System.Windows.Forms.Padding(20, 0, 0, 0)
     $nb.Cursor = [System.Windows.Forms.Cursors]::Hand
     $nb.Add_Click({ param($s, $e) Mostrar-Pagina $s.Tag })
     $lateral.Controls.Add($nb)
     [void]$script:NavBotoes.Add($nb)
-    $y += 54
+    $y += 56
 }
 $lblVersao = New-Object System.Windows.Forms.Label
-$lblVersao.Text = 'v2.0  |  modo administrador'
+$lblVersao.Text = 'OTIMIZADOR GAMER  |  v2.0'
 $lblVersao.AutoSize = $true
 $lblVersao.Font = (Fonte 'Segoe UI' 8 'Regular')
 $lblVersao.ForeColor = (ParaCor $script:Paleta.Mudo)
-$lblVersao.Location = New-Object System.Drawing.Point(24, 420)
+$lblVersao.Location = New-Object System.Drawing.Point(20, 458)
 $lateral.Controls.Add($lblVersao)
 
 # ---------- Pagina: PAINEL ----------
@@ -1251,7 +1251,7 @@ foreach ($c in @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:Card
 }
 $pgInicio.SetFlowBreak($script:CardDisco.Painel, $true)
 
-$btnTudo = Novo-Botao "EXECUTAR TUDO (RECOMENDADO)`nLimpeza segura, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 538 74
+$btnTudo = Novo-Botao "EXECUTAR MANUTENCAO RECOMENDADA`nLimpeza segura, energia, modo jogo, rede, disco e relatorio antes/depois" { Executar-Tudo } $script:Paleta.Neon 610 82
 $pgInicio.Controls.Add($btnTudo)
 $pgInicio.SetFlowBreak($btnTudo, $true)
 $pgInicio.Controls.Add((Novo-Botao "PONTO DE RESTAURACAO`nCria um ponto antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
@@ -1498,7 +1498,7 @@ $script:Form.Add_FormClosing({
 })
 
 $script:Form.Add_Shown({
-    Log 'Sistema pronto. Escolha uma opcao no menu ou use EXECUTAR TUDO.' Green
+    Log 'Sistema pronto. Escolha uma area no menu ou execute a manutencao recomendada.' Green
     if (-not $script:TemNvidia) { Log 'Leitura direta de GPU indisponivel: sem NVIDIA-SMI, uso e temperatura podem aparecer como N/D. A placa AMD/Intel continua utilizavel; esta versao ainda nao le sensores desses fabricantes.' Gray }
     try { Atualizar-Painel } catch { }
     $script:Timer.Start()
