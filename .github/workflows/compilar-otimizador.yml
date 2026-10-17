@@ -45,7 +45,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Invoke-PS2EXE -InputFile 'OtimizadorGamer.ps1' -OutputFile 'dist/OtimizadorGamer.exe' -NoConsole -Title 'Otimizador Gamer' -Product 'Otimizador Gamer' -Company 'Tryon Brasil' -Version '2.1.0.0' -FileVersion '2.1.0.0' -Copyright 'Tryon Brasil'
+          Invoke-PS2EXE -InputFile 'OtimizadorGamer.ps1' -OutputFile 'dist/OtimizadorGamer.exe' -NoConsole -Title 'Otimizador Gamer' -Product 'Otimizador Gamer' -Company 'Tryon Brasil' -Version '2.1.0.0' -Copyright 'Tryon Brasil'
           if (!(Test-Path 'dist/OtimizadorGamer.exe')) { throw 'O executável não foi gerado.' }
           $file = Get-Item 'dist/OtimizadorGamer.exe'
           Write-Host "Executável gerado: $($file.Length) bytes"
