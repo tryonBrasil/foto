@@ -297,6 +297,88 @@ function Desfazer-Ajustes {
     }
 }
 
+
+# ---------- Perfis reversiveis de desempenho ----------
+function Aplicar-Perfil {
+    param([ValidateSet('Equilibrado','Jogos','Economia')][string]$Perfil)
+    if (-not (Confirmar "Aplicar o perfil $Perfil? O plano de energia sera alterado e o anterior ficara salvo para restauracao.")) {
+        Log 'Aplicacao de perfil cancelada.' Yellow
+        return
+    }
+    $atual = Plano-Atual
+    if ($atual) { Salvar-Backup -Chave 'PlanoEnergia' -Valor $atual }
+    switch ($Perfil) {
+        'Jogos' {
+            $alvo = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -ne 0) { Log 'Plano Alto desempenho indisponivel; nenhum plano alternativo foi forcado.' Yellow; return }
+            Log 'Perfil Jogos aplicado. O consumo de energia pode aumentar.' Green
+        }
+        'Equilibrado' {
+            $alvo = '381b4222-f694-41f0-9685-ff5bb260df2e'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -eq 0) { Log 'Perfil Equilibrado aplicado.' Green } else { Log 'Nao foi possivel ativar o plano Equilibrado.' Yellow }
+        }
+        'Economia' {
+            $alvo = 'a1841308-3541-4fab-bc81-f71556f20b4a'
+            powercfg /setactive $alvo 2>$null
+            if ($LASTEXITCODE -eq 0) { Log 'Perfil Economia aplicado.' Green } else { Log 'Plano Economia indisponivel neste Windows.' Yellow }
+        }
+    }
+}
+
+function Mostrar-ResumoHardware {
+    Log '--- Resumo de hardware ---' Cyan
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $gpus = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)
+        $discos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue)
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        Log ("Windows: {0} | build {1}" -f $os.Caption, $os.BuildNumber) Cyan
+        Log ("CPU: {0}" -f $cpu.Name) Green
+        Log ("RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB)) Green
+        foreach ($gpu in $gpus) { Log ("GPU: {0}" -f $gpu.Name) Green }
+        foreach ($d in $discos) { Log ("Disco: {0} | {1} | {2}" -f $d.FriendlyName, $d.MediaType, $d.HealthStatus) Green }
+        Log 'Temperaturas dependem do suporte do fabricante/driver; N/D nao significa defeito.' Yellow
+    } catch { Log "Falha ao ler hardware: $($_.Exception.Message)" Red }
+}
+
+function Abrir-GerenciadorInicializacao {
+    Log 'Abrindo ferramentas nativas. Nenhum aplicativo sera desativado automaticamente.' Cyan
+    try { Start-Process 'ms-settings:startupapps' -ErrorAction Stop }
+    catch {
+        try { Start-Process 'taskmgr.exe' -ErrorAction Stop; Log 'No Gerenciador de Tarefas, abra Aplicativos de inicializacao.' Yellow }
+        catch { Log 'Nao foi possivel abrir o gerenciador de inicializacao.' Red }
+    }
+}
+
+function Exportar-RelatorioSistema {
+    $destino = Join-Path $script:Pasta ("relatorio_sistema_{0}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        $gpu = @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name })
+        $discos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FriendlyName) | $($_.MediaType) | $($_.HealthStatus)" })
+        @(
+            'RELATORIO DO OTIMIZADOR GAMER',
+            "Data: $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')",
+            "Windows: $($os.Caption) (build $($os.BuildNumber))",
+            "CPU: $($cpu.Name)",
+            ("RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB)),
+            "Uso CPU agora: $(Uso-CPU)%",
+            "Uso RAM agora: $(Uso-RAM)%",
+            "GPU: $($gpu -join '; ')",
+            "Discos: $($discos -join '; ')",
+            '',
+            'Temperaturas e FPS dependem de ferramentas compativeis; nao sao estimados.'
+        ) | Set-Content -Path $destino -Encoding UTF8
+        Log "Relatorio exportado: $destino" Green
+        Start-Process notepad.exe -ArgumentList "`"$destino`""
+    } catch { Log "Falha ao exportar relatorio: $($_.Exception.Message)" Red }
+}
+
 # ============================================================
 #  LIMPEZA E DESEMPENHO
 # ============================================================
@@ -1132,6 +1214,12 @@ $pgDes.Controls.Add((Novo-Botao "GPU E EFEITOS VISUAIS`nHAGS, menos animacoes e 
 $pgDes.Controls.Add((Novo-Botao "HORARIO ATIVO DO UPDATE`nEvita reinicio enquanto voce joga" { Definir-HorarioAtivo } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "APPS DE INICIALIZACAO`nLista o que abre com o Windows" { Listar-Inicializacao } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "REMOVER BLOATWARE`nEscolha apps inuteis para remover" { Remover-Bloatware } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'PERFIS RAPIDOS'
+$pgDes.Controls.Add((Novo-Botao "PERFIL JOGOS`nAlto desempenho quando disponivel" { Aplicar-Perfil 'Jogos' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "PERFIL EQUILIBRADO`nUso diario e consumo moderado" { Aplicar-Perfil 'Equilibrado' } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "PERFIL ECONOMIA`nReduz consumo quando disponivel" { Aplicar-Perfil 'Economia' } $script:Paleta.Amarelo))
+$pgDes.Controls.Add((Novo-Botao "INICIALIZACAO DO WINDOWS`nGerencie apps nas ferramentas nativas" { Abrir-GerenciadorInicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "RESUMO DE HARDWARE`nCPU, RAM, GPU e discos detectados" { Mostrar-ResumoHardware } $script:Paleta.Neon))
 
 # ---------- Pagina: DISCO ----------
 $pgDisco = Nova-Pagina 'disco' 'DISCO' 'Saude, verificacao, otimizacao e velocidade. TRIM em SSD e desfragmentacao apenas em HDD.'
@@ -1301,6 +1389,7 @@ $pgAg = Nova-Pagina 'agenda' 'AGENDAR E RELATORIOS' 'Manutencao automatica seman
 $pgAg.Controls.Add((Novo-Botao "AGENDAR MANUTENCAO SEMANAL`nDomingo as 04:00 (roda ao ligar se perdeu)" { Agendar-Manutencao }))
 $pgAg.Controls.Add((Novo-Botao "REMOVER AGENDAMENTO`nCancela a manutencao automatica" { Remover-Agendamento } $script:Paleta.Rosa))
 $pgAg.Controls.Add((Novo-Botao "ABRIR PASTA DE LOGS`nLogs e relatorios antes/depois" { Start-Process explorer.exe -ArgumentList "`"$($script:Pasta)`"" } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "EXPORTAR RELATORIO DO PC`nGera arquivo com hardware e uso atual" { Exportar-RelatorioSistema } $script:Paleta.Neon))
 
 # ---------- Eventos de opcoes ----------
 $script:ChkAuto.Add_CheckedChanged({ Salvar-Config })
