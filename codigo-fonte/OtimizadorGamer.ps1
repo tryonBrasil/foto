@@ -653,6 +653,36 @@ function Gerenciar-MemoriaProcessos {
 }
 
 
+
+# ---------- BACKUP E RESTAURACAO ----------
+function Obter-ArquivosBackup {
+ $cats=@($script:BackupChecks.Keys|Where-Object {$script:BackupChecks[$_].Checked});$roots=@();$u=[Environment]::GetFolderPath('UserProfile')
+ foreach($p in @('Desktop','Documents','Downloads','Pictures','Videos','Music','Saved Games')){$x=Join-Path $u $p;if(Test-Path -LiteralPath $x -PathType Container){$roots+= $x}}
+ foreach($x in @((Join-Path $u 'OneDrive'),(Join-Path $u 'Documents\My Games'),$env:APPDATA,$env:LOCALAPPDATA,(Join-Path $env:ProgramFiles 'Steam\userdata'))){if($x -and (Test-Path -LiteralPath $x -PathType Container)){$roots+=$x}}
+ $ext=@{Fotos=@('.jpg','.jpeg','.png','.gif','.bmp','.webp','.heic','.tif','.tiff','.raw','.cr2','.nef','.arw','.dng');Videos=@('.mp4','.mkv','.mov','.avi','.wmv','.webm','.m4v','.mpeg','.mpg','.3gp');Documentos=@('.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt','.rtf','.odt','.ods','.csv');Musicas=@('.mp3','.wav','.flac','.aac','.m4a','.ogg','.wma');Compactados=@('.zip','.7z','.rar','.tar','.gz','.iso');Projetos=@('.ps1','.py','.js','.ts','.html','.css','.java','.cpp','.c','.cs','.sln','.blend','.psd')}
+ $out=New-Object 'System.Collections.Generic.List[System.IO.FileInfo]';$seen=@{}
+ foreach($root in ($roots|Select-Object -Unique)){try{Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue|ForEach-Object {$f=$_;$take=$false;if($cats -contains 'Pastas pessoais' -and $root -like "$u*"){$take=$true};if($cats -contains 'Jogos e saves' -and ($root -like '*Saved Games*' -or $root -like '*My Games*' -or $root -like '*Steam*userdata*' -or $root -eq $env:APPDATA -or $root -eq $env:LOCALAPPDATA)){$take=$true};foreach($c in $cats){if($ext.ContainsKey($c) -and $ext[$c] -contains $f.Extension.ToLowerInvariant()){$take=$true}};if($take -and !$seen.ContainsKey($f.FullName)){$seen[$f.FullName]=$true;$out.Add($f)}}}catch{}}
+ return @($out)
+}
+function Escolher-DestinoBackup {$d=New-Object Windows.Forms.FolderBrowserDialog;$d.Description='Escolha HD externo, pendrive ou outro disco (não o que será formatado).';if($d.ShowDialog($script:Form)-eq[Windows.Forms.DialogResult]::OK){$script:BackupDestino=$d.SelectedPath;$script:BackupDestinoLabel.Text='Destino: '+$d.SelectedPath}}
+function Analisar-Backup {$script:BackupEstado.Text='Analisando...';$script:BackupEstado.Refresh();$files=@(Obter-ArquivosBackup);$bytes=0L;foreach($f in $files){$bytes+=[long]$f.Length};$script:BackupFiles=$files;$script:BackupBytes=$bytes;$free='Escolha o destino para verificar espaço livre.';if($script:BackupDestino){$d=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($script:BackupDestino));$free='Livre no destino: {0:N2} GB' -f ($d.AvailableFreeSpace/1GB)};$script:BackupEstado.Text=('Encontrados {0:N0} arquivos | Necessário {1:N2} GB | {2}' -f $files.Count,($bytes/1GB),$free);Log $script:BackupEstado.Text Cyan}
+function Fazer-Backup {
+ if(!$script:BackupDestino){[void][Windows.Forms.MessageBox]::Show('Escolha o destino primeiro.','HS-Tech','OK','Warning');return};if(!$script:BackupFiles -or !$script:BackupFiles.Count){Analisar-Backup};$files=@($script:BackupFiles);if(!$files.Count){return}
+ $drv=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($script:BackupDestino));if($drv.AvailableFreeSpace -lt ($script:BackupBytes+1GB)){[void][Windows.Forms.MessageBox]::Show('Espaço insuficiente no destino.','HS-Tech','OK','Error');return}
+ if(!(Confirmar ('Copiar {0} arquivos ({1:N2} GB) para {2}?' -f $files.Count,($script:BackupBytes/1GB),$script:BackupDestino))){return}
+ $folder=Join-Path $script:BackupDestino ('HS-Tech-Backup-'+(Get-Date -Format 'yyyyMMdd-HHmmss'));$data=Join-Path $folder 'Arquivos';New-Item -ItemType Directory -Path $data -Force|Out-Null;$manifest=New-Object 'System.Collections.Generic.List[object]';$i=0
+ foreach($f in $files){$i++;$root=[IO.Path]::GetPathRoot($f.FullName);$rel=$f.FullName.Substring($root.Length).TrimStart('\');$dest=Join-Path (Join-Path $data ($root.TrimEnd('\').Replace(':',''))) $rel;$parent=Split-Path $dest -Parent;try{if(!(Test-Path $parent)){New-Item -ItemType Directory -Path $parent -Force|Out-Null};Copy-Item -LiteralPath $f.FullName -Destination $dest -Force -ErrorAction Stop;$status='OK'}catch{$status='ERRO'};$manifest.Add([pscustomobject]@{Original=$f.FullName;Backup=$dest;Status=$status;Bytes=[long]$f.Length});if($i%50-eq 0){$script:BackupEstado.Text="Copiando $i de $($files.Count)...";$script:BackupEstado.Refresh();[Windows.Forms.Application]::DoEvents()}}
+ $manifest|ConvertTo-Json -Depth 3|Set-Content (Join-Path $folder 'manifest.json') -Encoding UTF8;$ok=@($manifest|Where-Object Status -eq 'OK').Count;$script:BackupEstado.Text="Backup concluído: $ok de $($files.Count) arquivos. Pasta: $folder";[void][Windows.Forms.MessageBox]::Show($script:BackupEstado.Text,'HS-Tech','OK','Information')
+}
+function Restaurar-Backup {
+ $found=@();foreach($d in [IO.DriveInfo]::GetDrives()){if($d.IsReady -and $d.DriveType -in @([IO.DriveType]::Fixed,[IO.DriveType]::Removable)){try{$found+=Get-ChildItem -LiteralPath $d.RootDirectory.FullName -Directory -Filter 'HS-Tech-Backup-*' -ErrorAction SilentlyContinue|Where-Object {Test-Path (Join-Path $_.FullName 'manifest.json')}|ForEach-Object {$_.FullName}}catch{}}}
+ if(!$found.Count){[void][Windows.Forms.MessageBox]::Show('Nenhum backup HS-Tech encontrado nos discos conectados.','HS-Tech','OK','Information');return}
+ $dlg=New-Object Windows.Forms.Form;$dlg.Text='Selecionar backup';$dlg.Size=New-Object Drawing.Size(760,300);$dlg.StartPosition='CenterParent';$list=New-Object Windows.Forms.ListBox;$list.Location=New-Object Drawing.Point(10,10);$list.Size=New-Object Drawing.Size(720,190);foreach($f in $found){[void]$list.Items.Add($f)};$dlg.Controls.Add($list);$b=New-Object Windows.Forms.Button;$b.Text='Restaurar';$b.Location=New-Object Drawing.Point(10,210);$b.Add_Click({if($list.SelectedItem){$dlg.Tag=[string]$list.SelectedItem;$dlg.DialogResult='OK';$dlg.Close()}});$dlg.Controls.Add($b);if($dlg.ShowDialog($script:Form)-ne[Windows.Forms.DialogResult]::OK){$dlg.Dispose();return};$folder=[string]$dlg.Tag;$dlg.Dispose();$manifest=@(Get-Content (Join-Path $folder 'manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json);$good=@($manifest|Where-Object {$_.Status -eq 'OK' -and (Test-Path -LiteralPath $_.Backup)});if(!(Confirmar ("Restaurar {0} arquivos? Sim: caminhos originais; Não: pasta HS-Tech-Restaurado." -f $good.Count))){return};$choice=[Windows.Forms.MessageBox]::Show('Restaurar nos caminhos originais? Sim = original; Não = pasta segura.','HS-Tech','YesNoCancel','Warning');if($choice-eq'Cancel'){return};$count=0;foreach($f in $good){try{$to=if($choice-eq'Yes'){[string]$f.Original}else{Join-Path (Join-Path $env:USERPROFILE 'HS-Tech-Restaurado') ([string]$f.Original).TrimStart('\').Replace(':','')};$parent=Split-Path $to -Parent;if(!(Test-Path $parent)){New-Item -ItemType Directory -Path $parent -Force|Out-Null};Copy-Item -LiteralPath $f.Backup -Destination $to -Force;$count++}catch{}};$script:BackupEstado.Text="Restauração: $count arquivos copiados.";[void][Windows.Forms.MessageBox]::Show($script:BackupEstado.Text,'HS-Tech','OK','Information')
+}
+function Criar-ParticaoBackup {
+ try{$disks=@(Get-Disk|Where-Object {$_.OperationalStatus -contains 'Online'});$list=@();foreach($d in $disks){$p=@(Get-Partition -DiskNumber $d.Number -ErrorAction SilentlyContinue);$used=($p|Measure-Object Size -Sum).Sum;$free=[long]$d.Size-[long]$used;if($free-gt 5GB){$list+= [pscustomobject]@{N=$d.Number;Name=$d.FriendlyName;Free=$free}}};if(!$list.Count){[void][Windows.Forms.MessageBox]::Show('Sem espaço não alocado suficiente. Libere espaço não alocado pelo Gerenciamento de Disco.','HS-Tech','OK','Information');return};$msg=(($list|ForEach-Object {"Disco $($_.N) - $($_.Name) - {0:N2} GB" -f ($_.Free/1GB)})-join [Environment]::NewLine)+[Environment]::NewLine+'Digite o número do disco a usar:';$n=[Microsoft.VisualBasic.Interaction]::InputBox($msg,'Criar partição','');if($n-notmatch'^\d+$'-or @($list|Where-Object {$_.N-eq[int]$n}).Count-eq 0){return};if(!(Confirmar "Criar/formatar NTFS no espaço NÃO ALOCADO do disco $n? Partições existentes não serão formatadas.")){return};$p=New-Partition -DiskNumber ([int]$n) -UseMaximumSize -AssignDriveLetter;$v=Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false;$script:BackupDestino=$v.DriveLetter+':\';$script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino;[void][Windows.Forms.MessageBox]::Show('Partição criada. Aviso: se formatar o disco inteiro, esse backup também será apagado.','HS-Tech','OK','Information')}catch{[void][Windows.Forms.MessageBox]::Show("Falha ao criar partição: $($_.Exception.Message)",'HS-Tech','OK','Error')}
+}
+
 function Localizar-PastaProgramas {$c=@();if($env:LOCALAPPDATA){$c+=(Join-Path (Join-Path $env:LOCALAPPDATA 'HS-Tech') 'programas')};if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path $PSScriptRoot 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path $b 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
 function Ler-BibliotecaProgramas {$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$f=Join-Path (Join-Path $b 'HS-Tech') 'programas.json';if(Test-Path $f){try{return @((Get-Content $f -Raw -Encoding UTF8|ConvertFrom-Json))}catch{}};return @()}
 function Salvar-BibliotecaProgramas {try{$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$d=Join-Path $b 'HS-Tech';if(!(Test-Path $d)){[void](New-Item -ItemType Directory -Path $d -Force)};ConvertTo-Json -InputObject @($script:BibliotecaProgramas) -Depth 4|Set-Content (Join-Path $d 'programas.json') -Encoding UTF8}catch{Log "Falha ao salvar biblioteca: $($_.Exception.Message)" Red}}
@@ -3660,6 +3690,7 @@ $entradasNav = @(
     @('N', 'diag', 'Diagnóstico'),
     @('G', 'JOGOS'),
     @('N', 'jogos', 'Perfis por jogo'),
+    @('N', 'backup', 'Backup e restauração'),
     @('N', 'programas', 'Programas'),
     @('N', 'monitor', 'Monitor e alertas'),
     @('G', 'AUTOMAÇÃO'),
@@ -3762,6 +3793,28 @@ $pgInicio.Controls.Add((Novo-Botao "Criar ponto de restauração`nSalva o estado
 $pgInicio.Controls.Add((Novo-Botao "Desfazer ajustes`nVolta registro, plano de energia e DNS" { Desfazer-Ajustes } $script:Paleta.Rosa))
 
 # ============================================================
+
+# ============================================================
+#  PAGINA: BACKUP E RESTAURACAO
+# ============================================================
+$pgBackup=Nova-Pagina 'backup' 'Backup e restauração' 'Salve dados antes de formatar e restaure depois.'
+Nova-Secao $pgBackup 'SELECIONE O QUE DESEJA SALVAR'
+$script:BackupChecks=@{}
+$catsPanel=New-Object Windows.Forms.FlowLayoutPanel;$catsPanel.Width=900;$catsPanel.Height=78;$catsPanel.WrapContents=$true
+foreach($cat in @('Fotos','Videos','Documentos','Musicas','Compactados','Projetos','Pastas pessoais','Jogos e saves')){$cb=New-Object Windows.Forms.CheckBox;$cb.Text=$cat;$cb.Checked=($cat -in @('Fotos','Videos','Documentos','Compactados','Projetos','Pastas pessoais','Jogos e saves'));$cb.AutoSize=$true;$cb.Margin=New-Object Windows.Forms.Padding(8,7,15,7);$cb.ForeColor=ParaCor $script:Paleta.Texto;$catsPanel.Controls.Add($cb);$script:BackupChecks[$cat]=$cb}
+$pgBackup.Controls.Add($catsPanel);$pgBackup.SetFlowBreak($catsPanel,$true)
+$warn=Novo-Label 'Busca nas pastas do usuário e locais comuns de saves. Jogos podem usar caminhos personalizados; confira o resultado antes de formatar.' 9 $script:Paleta.Amarelo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($warn);$pgBackup.SetFlowBreak($warn,$true)
+$line=New-Object Windows.Forms.Panel;$line.Width=900;$line.Height=42
+$b=Novo-BotaoPequeno 'ESCOLHER DESTINO' {Escolher-DestinoBackup} $script:Paleta.Cian 150 34;$b.Location=New-Object Drawing.Point(0,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'CRIAR PARTIÇÃO' {Criar-ParticaoBackup} $script:Paleta.Rosa 135 34;$b.Location=New-Object Drawing.Point(155,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'ANALISAR TAMANHO' {Analisar-Backup} $script:Paleta.Neon 155 34;$b.Location=New-Object Drawing.Point(295,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'FAZER BACKUP' {Analisar-Backup;Fazer-Backup} $script:Paleta.Neon 130 34;$b.Location=New-Object Drawing.Point(455,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'RESTAURAR BACKUP' {Restaurar-Backup} $script:Paleta.Cian 155 34;$b.Location=New-Object Drawing.Point(590,2);$line.Controls.Add($b)
+$pgBackup.Controls.Add($line);$pgBackup.SetFlowBreak($line,$true)
+$script:BackupDestino=$null;$script:BackupFiles=@();$script:BackupBytes=0L
+$script:BackupDestinoLabel=Novo-Label 'Destino: não selecionado' 9 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($script:BackupDestinoLabel);$pgBackup.SetFlowBreak($script:BackupDestinoLabel,$true)
+$script:BackupEstado=Novo-Label 'Escolha as categorias, destino e analise o tamanho antes de copiar.' 10 $script:Paleta.Texto 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($script:BackupEstado);$pgBackup.SetFlowBreak($script:BackupEstado,$true)
+$warn2=Novo-Label 'Importante: uma partição no mesmo disco NÃO protege contra formatação do disco inteiro ou falha física. Para clientes, prefira HD/SSD externo. A restauração procura backups nas raízes dos discos conectados.' 9 $script:Paleta.Amarelo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($warn2);$pgBackup.SetFlowBreak($warn2,$true)
 
 # ============================================================
 #  PAGINA: PROGRAMAS
