@@ -79,8 +79,8 @@ jobs:
       - name: Gerar executavel unico e portatil
         shell: powershell
         run: |
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe'
-          Invoke-PS2EXE -inputFile $env:SCRIPT_BUILD -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS-Tech - Central de Ferramentas" -company "HS-Tech" -product "HS-Tech Diagnostico e Otimizacao" -version "3.5.0.0"
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'HS-Tech.exe'
+          Invoke-PS2EXE -inputFile $env:SCRIPT_BUILD -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS-Tech | Central de Ferramentas" -company "HS-Tech" -product "HS-Tech Central de Ferramentas" -version "3.6.0.0"
           if (!(Test-Path $exe)) { throw 'O executavel nao foi gerado.' }
 
       - name: Preparar pacote portatil
@@ -88,7 +88,7 @@ jobs:
         run: |
           $pacote = Join-Path $env:GITHUB_WORKSPACE 'pacote'
           New-Item -ItemType Directory -Path $pacote -Force | Out-Null
-          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe') $pacote
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'HS-Tech.exe') $pacote
           if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt') $pacote }
           if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html') $pacote }
 
