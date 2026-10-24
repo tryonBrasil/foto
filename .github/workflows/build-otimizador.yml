@@ -1,4 +1,4 @@
-name: Build HS Tech Otimizador Gamer EXE
+name: Build HS-Tech Otimizador Gamer EXE
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
         run: |
           $script = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
           $exe = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe'
-          Invoke-PS2EXE -inputFile $script -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS Tech - Central de Ferramentas" -company "HS Tech" -product "HS Tech Diagnostico e Otimizacao" -version "2.1.0.0"
+          Invoke-PS2EXE -inputFile $script -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS-Tech - Central de Ferramentas" -company "HS-Tech" -product "HS-Tech Diagnostico e Otimizacao" -version "3.4.0.0"
           if (!(Test-Path $exe)) { throw 'O executavel nao foi gerado.' }
 
       - name: Preparar pacote
