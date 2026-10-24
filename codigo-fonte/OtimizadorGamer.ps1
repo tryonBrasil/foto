@@ -679,8 +679,81 @@ function Restaurar-Backup {
  if(!$found.Count){[void][Windows.Forms.MessageBox]::Show('Nenhum backup HS-Tech encontrado nos discos conectados.','HS-Tech','OK','Information');return}
  $dlg=New-Object Windows.Forms.Form;$dlg.Text='Selecionar backup';$dlg.Size=New-Object Drawing.Size(760,300);$dlg.StartPosition='CenterParent';$list=New-Object Windows.Forms.ListBox;$list.Location=New-Object Drawing.Point(10,10);$list.Size=New-Object Drawing.Size(720,190);foreach($f in $found){[void]$list.Items.Add($f)};$dlg.Controls.Add($list);$b=New-Object Windows.Forms.Button;$b.Text='Restaurar';$b.Location=New-Object Drawing.Point(10,210);$b.Add_Click({if($list.SelectedItem){$dlg.Tag=[string]$list.SelectedItem;$dlg.DialogResult='OK';$dlg.Close()}});$dlg.Controls.Add($b);if($dlg.ShowDialog($script:Form)-ne[Windows.Forms.DialogResult]::OK){$dlg.Dispose();return};$folder=[string]$dlg.Tag;$dlg.Dispose();$manifest=@(Get-Content (Join-Path $folder 'manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json);$good=@($manifest|Where-Object {$_.Status -eq 'OK' -and (Test-Path -LiteralPath $_.Backup)});if(!(Confirmar ("Restaurar {0} arquivos? Sim: caminhos originais; Não: pasta HS-Tech-Restaurado." -f $good.Count))){return};$choice=[Windows.Forms.MessageBox]::Show('Restaurar nos caminhos originais? Sim = original; Não = pasta segura.','HS-Tech','YesNoCancel','Warning');if($choice-eq'Cancel'){return};$count=0;foreach($f in $good){try{$to=if($choice-eq'Yes'){[string]$f.Original}else{Join-Path (Join-Path $env:USERPROFILE 'HS-Tech-Restaurado') ([string]$f.Original).TrimStart('\').Replace(':','')};$parent=Split-Path $to -Parent;if(!(Test-Path $parent)){New-Item -ItemType Directory -Path $parent -Force|Out-Null};Copy-Item -LiteralPath $f.Backup -Destination $to -Force;$count++}catch{}};$script:BackupEstado.Text="Restauração: $count arquivos copiados.";[void][Windows.Forms.MessageBox]::Show($script:BackupEstado.Text,'HS-Tech','OK','Information')
 }
+function Obter-EspacoNaoAlocadoDisco {
+ param([Parameter(Mandatory=$true)][object]$Disco)
+ $limite=[long]$Disco.Size
+ $particoes=@(Get-Partition -DiskNumber ([int]$Disco.Number) -ErrorAction SilentlyContinue | Sort-Object Offset)
+ $intervalos=New-Object System.Collections.Generic.List[object]
+ $cursor=[long]0
+ foreach($part in $particoes){
+   $inicio=[long]$part.Offset
+   $tamanho=[long]$part.Size
+   if($inicio -gt $cursor){
+     $livre=$inicio-$cursor
+     if($livre -ge 1MB){$intervalos.Add([pscustomobject]@{Inicio=$cursor;Tamanho=$livre})}
+   }
+   $fim=$inicio+$tamanho
+   if($fim -gt $cursor){$cursor=$fim}
+ }
+ if($limite -gt $cursor){
+   $livre=$limite-$cursor
+   if($livre -ge 1MB){$intervalos.Add([pscustomobject]@{Inicio=$cursor;Tamanho=$livre})}
+ }
+ $maior=$null
+ foreach($iv in $intervalos){if($null -eq $maior -or $iv.Tamanho -gt $maior.Tamanho){$maior=$iv}}
+ [pscustomobject]@{Disco=$Disco;Particoes=$particoes;Intervalos=@($intervalos);TotalNaoAlocado=[long](($intervalos|Measure-Object Tamanho -Sum).Sum);MaiorIntervalo=$maior}
+}
+
 function Criar-ParticaoBackup {
- try{$disks=@(Get-Disk|Where-Object {$_.OperationalStatus -contains 'Online'});$list=@();foreach($d in $disks){$p=@(Get-Partition -DiskNumber $d.Number -ErrorAction SilentlyContinue);$used=($p|Measure-Object Size -Sum).Sum;$free=[long]$d.Size-[long]$used;if($free-gt 5GB){$list+= [pscustomobject]@{N=$d.Number;Name=$d.FriendlyName;Free=$free}}};if(!$list.Count){[void][Windows.Forms.MessageBox]::Show('Sem espaço não alocado suficiente. Libere espaço não alocado pelo Gerenciamento de Disco.','HS-Tech','OK','Information');return};$msg=(($list|ForEach-Object {"Disco $($_.N) - $($_.Name) - {0:N2} GB" -f ($_.Free/1GB)})-join [Environment]::NewLine)+[Environment]::NewLine+'Digite o número do disco a usar:';$n=[Microsoft.VisualBasic.Interaction]::InputBox($msg,'Criar partição','');if($n-notmatch'^\d+$'-or @($list|Where-Object {$_.N-eq[int]$n}).Count-eq 0){return};if(!(Confirmar "Criar/formatar NTFS no espaço NÃO ALOCADO do disco $n? Partições existentes não serão formatadas.")){return};$p=New-Partition -DiskNumber ([int]$n) -UseMaximumSize -AssignDriveLetter;$v=Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false;$script:BackupDestino=$v.DriveLetter+':\';$script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino;[void][Windows.Forms.MessageBox]::Show('Partição criada. Aviso: se formatar o disco inteiro, esse backup também será apagado.','HS-Tech','OK','Information')}catch{[void][Windows.Forms.MessageBox]::Show("Falha ao criar partição: $($_.Exception.Message)",'HS-Tech','OK','Error')}
+ try {
+   if(-not (Get-Command Get-Disk -ErrorAction SilentlyContinue) -or -not (Get-Command Get-Partition -ErrorAction SilentlyContinue)){
+     [void][Windows.Forms.MessageBox]::Show('Este Windows não disponibilizou as ferramentas de verificação de discos. Execute o HS-Tech como administrador e tente novamente.','HS-Tech - Verificar unidade','OK','Warning');return
+   }
+   Log 'Verificando discos, partições e espaço realmente não alocado...' Cyan
+   $discos=@(Get-Disk -ErrorAction Stop | Where-Object {$_.OperationalStatus -contains 'Online' -and -not $_.IsBoot -and -not $_.IsSystem})
+   if(!$discos.Count){$discos=@(Get-Disk -ErrorAction Stop | Where-Object {$_.OperationalStatus -contains 'Online'})}
+   $analises=@()
+   foreach($d in $discos){
+     $a=Obter-EspacoNaoAlocadoDisco -Disco $d
+     $analises+= $a
+     $totalGB=[math]::Round($a.TotalNaoAlocado/1GB,2)
+     $maiorGB=if($a.MaiorIntervalo){[math]::Round($a.MaiorIntervalo.Tamanho/1GB,2)}else{0}
+     Log ("Disco {0} ({1}): espaço não alocado total {2:N2} GB; maior bloco contínuo {3:N2} GB; estado {4}" -f $d.Number,$d.FriendlyName,$totalGB,$maiorGB,$d.OperationalStatus) $(if($maiorGB -ge 5){'Green'}else{'Yellow'})
+   }
+   if(!$analises.Count){[void][Windows.Forms.MessageBox]::Show('Nenhuma unidade online foi encontrada.','HS-Tech - Verificar unidade','OK','Information');return}
+   $nl=[Environment]::NewLine
+   $linhas=@()
+   foreach($a in $analises){
+     $d=$a.Disco
+     $livreGB=[math]::Round($a.TotalNaoAlocado/1GB,2)
+     $maiorGB=if($a.MaiorIntervalo){[math]::Round($a.MaiorIntervalo.Tamanho/1GB,2)}else{0}
+     $linhas+=("Disco {0} - {1}{6}  Capacidade: {2:N2} GB | Partições: {3}{6}  Espaço não alocado total: {4:N2} GB{6}  Maior bloco contínuo disponível: {5:N2} GB" -f $d.Number,$d.FriendlyName,($d.Size/1GB),$a.Particoes.Count,$livreGB,$maiorGB,$nl)
+   }
+   $relatorio=$linhas -join ($nl+$nl)
+   [void][Windows.Forms.MessageBox]::Show(("Verificação concluída. O espaço total não alocado pode estar dividido em blocos; para criar uma partição conta o maior bloco contínuo."+$nl+$nl+$relatorio),'HS-Tech - Resultado da verificação','OK','Information')
+   $elegiveis=@($analises|Where-Object {$_.MaiorIntervalo -and $_.MaiorIntervalo.Tamanho -ge 5GB})
+   if(!$elegiveis.Count){[void][Windows.Forms.MessageBox]::Show('Nenhum disco possui um bloco contínuo de pelo menos 5 GB não alocados. O HS-Tech não vai reduzir nem formatar partições existentes. Se necessário, abra Gerenciamento de Disco e libere espaço não alocado primeiro.','HS-Tech - Sem espaço suficiente','OK','Warning');return}
+   $opcoes=($elegiveis|ForEach-Object {"$($_.Disco.Number) - $($_.Disco.FriendlyName) (máximo aprox. $([math]::Round($_.MaiorIntervalo.Tamanho/1GB,2)) GB)"}) -join $nl
+   $n=[Microsoft.VisualBasic.Interaction]::InputBox(("Digite o número do disco para criar a partição no espaço não alocado:"+$nl+$nl+$opcoes),'HS-Tech - Escolher disco','')
+   if([string]::IsNullOrWhiteSpace($n) -or $n -notmatch '^\d+$'){return}
+   $selecionado=@($elegiveis|Where-Object {$_.Disco.Number -eq [int]$n})|Select-Object -First 1
+   if(!$selecionado){[void][Windows.Forms.MessageBox]::Show('Número inválido ou disco sem espaço contínuo suficiente. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
+   $discoAtual=Get-Disk -Number ([int]$n) -ErrorAction Stop
+   if($discoAtual.IsReadOnly -or $discoAtual.IsOffline){[void][Windows.Forms.MessageBox]::Show('O disco está offline ou somente leitura. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
+   $atual=Obter-EspacoNaoAlocadoDisco -Disco $discoAtual
+   if(!$atual.MaiorIntervalo -or $atual.MaiorIntervalo.Tamanho -lt 5GB){[void][Windows.Forms.MessageBox]::Show('O espaço disponível mudou e agora é menor que 5 GB. Faça a verificação novamente.','HS-Tech','OK','Warning');return}
+   $maxGB=[math]::Round($atual.MaiorIntervalo.Tamanho/1GB,2)
+   if(!(Confirmar "Verificação atualizada: o maior bloco contínuo não alocado do disco $n é de aproximadamente $maxGB GB. Criar uma partição NTFS usando esse espaço? Somente o espaço não alocado será usado; partições existentes não serão formatadas.")){return}
+   $p=New-Partition -DiskNumber ([int]$n) -UseMaximumSize -AssignDriveLetter -ErrorAction Stop
+   $v=Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
+   $script:BackupDestino=$v.DriveLetter+':\'
+   $script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino
+   Log ("Partição HS-TECH-BACKUP criada em {0} usando o espaço não alocado verificado (máximo aproximado {1:N2} GB)." -f $script:BackupDestino,$maxGB) Green
+   [void][Windows.Forms.MessageBox]::Show(("Partição criada e formatada em NTFS."+$nl+"Destino: "+$script:BackupDestino+$nl+"Tamanho aproximado: "+$maxGB+" GB"+$nl+$nl+"Atenção: uma partição no mesmo disco não protege contra falha física nem contra formatação do disco inteiro."),'HS-Tech - Partição criada','OK','Information')
+ } catch {
+   Log ("Erro ao verificar/criar partição: {0}" -f $_.Exception.Message) Red
+   [void][Windows.Forms.MessageBox]::Show("Não foi possível verificar ou criar a partição:"+[Environment]::NewLine+$($_.Exception.Message),'HS-Tech - Erro','OK','Error')
+ }
 }
 
 function Localizar-PastaProgramas {$c=@();if($env:LOCALAPPDATA){$c+=(Join-Path (Join-Path $env:LOCALAPPDATA 'HS-Tech') 'programas')};if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path $PSScriptRoot 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path $b 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
