@@ -15,16 +15,27 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# ---------- Caminho correto em modo PS1 e em EXE compilado ----------
+try { $script:ArquivoAtual = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { $script:ArquivoAtual = $PSCommandPath }
+if ([string]::IsNullOrWhiteSpace($script:ArquivoAtual)) { $script:ArquivoAtual = $PSCommandPath }
+$script:ExecutandoComoExe = ($script:ArquivoAtual -and $script:ArquivoAtual.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase))
+if ($script:ExecutandoComoExe) { $script:Pasta = Split-Path -Parent $script:ArquivoAtual } elseif ($PSCommandPath) { $script:Pasta = Split-Path -Parent $PSCommandPath } else { $script:Pasta = (Get-Location).Path }
+
 # ---------- Auto-elevacao (precisa de administrador) ----------
-$ehAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-           ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$ehAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $ehAdmin) {
-    $argsElev = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    if ($Manutencao) { $argsElev += ' -Manutencao' }
-    Start-Process powershell -Verb RunAs -ArgumentList $argsElev
+    try {
+        if ($script:ExecutandoComoExe) { Start-Process -FilePath $script:ArquivoAtual -Verb RunAs }
+        else {
+            $argsElev = '-NoProfile -ExecutionPolicy Bypass -File "' + $script:ArquivoAtual + '"'
+            if ($Manutencao) { $argsElev += ' -Manutencao' }
+            Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $argsElev
+        }
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show('O programa precisa de permissao de administrador. Abra novamente e aceite a janela do Windows.', 'HS Tech', 'OK', 'Warning') | Out-Null
+    }
     exit
 }
-
 # ---------- Esconde a janela preta do console (se existir) ----------
 try {
     Add-Type -Name Win -Namespace Native -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);'
@@ -34,7 +45,7 @@ try {
 # ============================================================
 #  CONFIGURACAO
 # ============================================================
-$script:Pasta         = Split-Path -Parent $PSCommandPath
+# $script:Pasta ja foi definido com suporte a PS1 e EXE acima
 $script:LogFile       = Join-Path $script:Pasta ("log_{0}.txt" -f (Get-Date -Format 'yyyyMMdd'))
 $script:BackupFile    = Join-Path $script:Pasta 'backup_ajustes.json'
 $script:JogosFile     = Join-Path $script:Pasta 'jogos.json'
