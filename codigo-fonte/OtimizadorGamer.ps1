@@ -63,7 +63,7 @@ else { $script:Pasta = Split-Path -Parent $script:CaminhoScript }
 
 # O executável contém um ZIP dos programas permitidos. Na primeira execução,
 # os arquivos são extraídos para o perfil do usuário; o EXE pode ser levado em USB.
-if ($script:EhExe -and $script:PacoteProgramasBase64 -ne '__HS_TECH_PROGRAMAS_BASE64__' -and $env:LOCALAPPDATA) {
+if ($script:EhExe -and $script:PacoteProgramasBase64.Length -gt 1000 -and $env:LOCALAPPDATA) {
     try {
         $pastaPacote = Join-Path $env:LOCALAPPDATA 'HS-Tech\programas'
         $seloPacote = Join-Path $pastaPacote '.hs-tech-bundle-v1'
@@ -71,6 +71,7 @@ if ($script:EhExe -and $script:PacoteProgramasBase64 -ne '__HS_TECH_PROGRAMAS_BA
             $raizPacote = Split-Path $pastaPacote -Parent
             if (-not (Test-Path $raizPacote)) { New-Item -ItemType Directory -Path $raizPacote -Force | Out-Null }
             if (Test-Path -LiteralPath $pastaPacote) { Remove-Item -LiteralPath $pastaPacote -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $pastaPacote -Force | Out-Null
             $zipPacote = Join-Path $env:TEMP ('HS-Tech-programas-' + [guid]::NewGuid().ToString('N') + '.zip')
             [IO.File]::WriteAllBytes($zipPacote, [Convert]::FromBase64String($script:PacoteProgramasBase64))
             Add-Type -AssemblyName System.IO.Compression.FileSystem
