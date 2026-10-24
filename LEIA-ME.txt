@@ -1,4 +1,4 @@
-﻿OTIMIZADOR GAMER v3.3
+﻿HS-TECH | HS-Tech v3.4
 =====================
 
 CONTEÚDO DO PACOTE
@@ -45,9 +45,7 @@ AVISOS IMPORTANTES
   - O Windows Update só oferece os drivers que ele conhece; nem todo fabricante
     publica lá. Para chipset, placa de vídeo e BIOS, o site do fabricante
     costuma ter versões mais novas.
-  - Esta versão foi validada por análise do código e testes de lógica com dados
-    simulados, mas ainda não foi testada na tela do Windows. Teste primeiro em um
-    PC seu antes de usar em cliente.
+  - O código passa por validação automatizada de sintaxe e compilação no GitHub Actions. A abertura, sensores de GPU e funções de manutenção ainda precisam de teste prático em Windows antes de uso em clientes.
   - Em notebooks, prefira o perfil Equilibrado; o Alto desempenho aumenta o
     consumo e a temperatura.
   - O plano Desempenho máximo é um plano oculto do Windows: não economiza
@@ -64,7 +62,11 @@ AVISOS IMPORTANTES
     %LOCALAPPDATA%\OtimizadorGamer
 
 COMO RECOMPILAR
-  Com PS2EXE (Windows):
-    Invoke-ps2exe .\OtimizadorGamer.ps1 .\OtimizadorGamer.exe -requireAdmin -noConsole -STA
-  Com Mono (Linux/Windows), dentro da pasta codigo-fonte:
-    mcs -target:winexe -r:System.Windows.Forms.dll -out:OtimizadorGamer.exe -resource:OtimizadorGamer.ps1,OtimizadorGamer.ps1 Launcher.cs
+  A compilação oficial é feita pelo GitHub Actions ao atualizar o script
+  codigo-fonte\\OtimizadorGamer.ps1. Abra a aba Actions do repositório e baixe
+  o artefato HS-Tech-Otimizador-Windows da execução concluída.
+
+GPU: o programa tenta identificar adaptadores NVIDIA, AMD e Intel. O uso da GPU
+pode ser lido pelos contadores nativos do Windows quando disponíveis. A temperatura
+depende do driver e de um provedor de sensores compatível (LibreHardwareMonitor ou
+OpenHardwareMonitor); se o sensor não estiver disponível, o programa mostra N/D.
