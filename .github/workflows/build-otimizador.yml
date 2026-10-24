@@ -42,7 +42,7 @@ jobs:
       - name: Gerar executavel
         shell: powershell
         run: |
-          Invoke-PS2EXE -inputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.ps1" -outputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe" -noConsole -x64
+          Invoke-PS2EXE -inputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.ps1" -outputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe" -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS Tech - Central de Ferramentas" -company "HS Tech" -product "HS Tech Diagnostico e Otimizacao" -version "2.1.0.0"
           if (!(Test-Path "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe")) { throw 'O executavel nao foi gerado.' }
 
       - name: Preparar pacote
