@@ -71,6 +71,7 @@ $script:ModoJogoAtivo = $false
 $script:JogoAtual = $null
 $script:PlanoAnterior = $null
 $script:UltimoAlerta = @{}
+$script:DiagnosticoDados = [ordered]@{}
 $script:TempDisco = $null
 $script:TemNvidia = [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
 $script:Botoes = New-Object System.Collections.ArrayList
@@ -947,9 +948,84 @@ function Mostrar-Pagina {
     }
 }
 
+
+# ---------- Diagnostico e laudo HS Tech ----------
+function Executar-DiagnosticoHS {
+    $script:DiagnosticoDados = [ordered]@{}
+    Log 'Iniciando diagnostico de hardware e Windows...' Cyan
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $os = Get-CimInstance Win32_OperatingSystem
+        $script:DiagnosticoDados['Computador'] = $cs.Name
+        $script:DiagnosticoDados['Fabricante/modelo'] = "$($cs.Manufacturer) $($cs.Model)"
+        $script:DiagnosticoDados['Processador'] = $cpu.Name
+        $script:DiagnosticoDados['RAM total'] = ('{0:N2} GB' -f ($cs.TotalPhysicalMemory / 1GB))
+        $script:DiagnosticoDados['RAM em uso'] = ('{0:N1}%' -f (100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize))
+        $script:DiagnosticoDados['Windows'] = "$($os.Caption), versao $($os.Version), build $($os.BuildNumber)"
+        $script:DiagnosticoDados['Ultima inicializacao'] = [string]$os.LastBootUpTime
+    } catch { Log "Aviso: alguns dados basicos nao puderam ser lidos: $($_.Exception.Message)" Yellow }
+    try { $script:DiagnosticoDados['Placa de video'] = ((Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name) (driver $($_.DriverVersion))" }) -join '; ') }
+    catch { $script:DiagnosticoDados['Placa de video'] = 'Nao disponivel' }
+    try { $script:DiagnosticoDados['Unidades e espaco livre'] = ((Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { "$($_.DeviceID): $([math]::Round($_.FreeSpace/1GB,1)) GB livres de $([math]::Round($_.Size/1GB,1)) GB" }) -join '; ') }
+    catch { $script:DiagnosticoDados['Unidades e espaco livre'] = 'Nao disponivel' }
+    try {
+        $discos = @(Get-PhysicalDisk | ForEach-Object { "$($_.FriendlyName): tipo $($_.MediaType), estado reportado $($_.HealthStatus)" })
+        if ($discos.Count) { $script:DiagnosticoDados['Saude reportada dos discos'] = $discos -join '; ' }
+        else { $script:DiagnosticoDados['Saude dos discos'] = 'O Windows nao retornou dados; isso nao confirma defeito.' }
+    } catch { $script:DiagnosticoDados['Saude dos discos'] = 'Consulta indisponivel neste equipamento' }
+    try {
+        $mp = Get-MpComputerStatus
+        $script:DiagnosticoDados['Microsoft Defender'] = "Antivirus habilitado: $($mp.AntivirusEnabled); protecao em tempo real: $($mp.RealTimeProtectionEnabled)"
+    } catch { $script:DiagnosticoDados['Microsoft Defender'] = 'Estado nao disponivel ou outro antivirus instalado' }
+    try { $script:DiagnosticoDados['Itens na inicializacao'] = [string]@((Get-CimInstance Win32_StartupCommand)).Count }
+    catch { $script:DiagnosticoDados['Itens na inicializacao'] = 'Nao disponivel' }
+    if ($script:DiagResultados) {
+        $script:DiagResultados.Clear()
+        foreach ($key in $script:DiagnosticoDados.Keys) { $script:DiagResultados.AppendText("$key : $($script:DiagnosticoDados[$key])" + [Environment]::NewLine + [Environment]::NewLine) }
+        $script:DiagResultados.AppendText("Observacao: sensores e saude dos discos dependem do hardware. Ausencia de dados nao significa componente bom ou ruim." + [Environment]::NewLine)
+    }
+    foreach ($key in $script:DiagnosticoDados.Keys) { Log "$key : $($script:DiagnosticoDados[$key])" Gray }
+    Log 'Diagnostico concluido. Defeitos fisicos exigem testes apropriados.' Green
+}
+
+function Gerar-LaudoHS {
+    if (-not $script:DiagnosticoDados.Count) {
+        [System.Windows.Forms.MessageBox]::Show('Execute o diagnostico antes de gerar o laudo.', 'HS Tech') | Out-Null
+        return
+    }
+    $folder = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'HS-Tech-Relatorios'
+    if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+    $encode = { param($v) [Net.WebUtility]::HtmlEncode([string]$v) }
+    $rows = ''
+    foreach ($key in $script:DiagnosticoDados.Keys) { $rows += "<tr><th>$(& $encode $key)</th><td>$(& $encode $script:DiagnosticoDados[$key])</td></tr>" }
+    $pecasValor = 0.0; $maoValor = 0.0
+    [void][double]::TryParse($script:DiagPecas.Text.Replace(',','.'), [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$pecasValor)
+    [void][double]::TryParse($script:DiagMaoObra.Text.Replace(',','.'), [Globalization.NumberStyles]::Any, [Globalization.CultureInfo]::InvariantCulture, [ref]$maoValor)
+    $total = ($pecasValor + $maoValor).ToString('N2', [Globalization.CultureInfo]::GetCultureInfo('pt-BR'))
+    $path = Join-Path $folder ('Laudo-HSTech-{0}.html' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $html = @"
+<!doctype html><html lang="pt-br"><meta charset="utf-8"><title>Laudo HS Tech</title>
+<style>body{font:15px Arial;margin:30px;color:#222}header{background:#111;color:white;padding:22px;border-left:8px solid #d2232b}h1{color:#f33}h2{border-bottom:2px solid #ddd}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}th{background:#eee;width:30%}.total{font-size:22px;color:#b21d26;font-weight:bold}.small{font-size:12px;color:#555}</style><body>
+<header><h1>HS ASSISTENCIA TECNICA</h1><p>HS Tech | Laudo de diagnostico e orcamento</p></header>
+<h2>Atendimento</h2><p><b>Data:</b> $(Get-Date -Format 'dd/MM/yyyy HH:mm')</p>
+<p><b>Cliente:</b> $(& $encode $script:DiagCliente.Text)</p><p><b>Contato:</b> $(& $encode $script:DiagContato.Text)</p>
+<p><b>Sintoma relatado:</b><br>$(& $encode $script:DiagSintoma.Text)</p>
+<h2>Dados coletados</h2><table>$rows</table>
+<h2>Servico e orcamento</h2><p><b>Servico recomendado:</b><br>$(& $encode $script:DiagServico.Text)</p>
+<p>Pecas: R&#36; $(& $encode $script:DiagPecas.Text) | Mao de obra: R&#36; $(& $encode $script:DiagMaoObra.Text)</p>
+<p class="total">Total estimado: R&#36; $total</p><p><b>Observacoes:</b><br>$(& $encode $script:DiagObs.Text)</p>
+<p class="small">Este relatorio registra dados coletados por software. Leituras indisponiveis nao comprovam defeito nem funcionamento correto. Defeitos fisicos exigem testes apropriados. Orcamento sujeito a confirmacao e autorizacao do cliente.</p></body></html>
+"@
+    [IO.File]::WriteAllText($path, $html, [Text.UTF8Encoding]::new($true))
+    Log "Laudo HS Tech salvo em: $path" Green
+    [System.Windows.Forms.MessageBox]::Show("Laudo salvo em: $path. Abra no navegador e use Imprimir para salvar em PDF.", 'HS Tech') | Out-Null
+    Start-Process $path
+}
+
 # ---------- Janela principal ----------
 $script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Text = 'Otimizador Gamer'
+$script:Form.Text = 'HS Tech | Central de Diagnostico e Otimizacao'
 $script:Form.Size = New-Object System.Drawing.Size(1120, 780)
 $script:Form.MinimumSize = New-Object System.Drawing.Size(1000, 700)
 $script:Form.StartPosition = 'CenterScreen'
@@ -1002,7 +1078,7 @@ $neonLinha.BackColor = (ParaCor $script:Paleta.Neon)
 $cabecalho.Controls.Add($neonLinha)
 
 $lblTitulo = New-Object System.Windows.Forms.Label
-$lblTitulo.Text = [string][char]0x26A1 + ' OTIMIZADOR GAMER'
+$lblTitulo.Text = [string][char]0x26A1 + ' HS TECH | CENTRAL DE FERRAMENTAS'
 $lblTitulo.AutoSize = $true
 $lblTitulo.Font = (Fonte 'Segoe UI Black' 24 'Regular')
 $lblTitulo.ForeColor = (ParaCor $script:Paleta.Neon)
@@ -1010,7 +1086,7 @@ $lblTitulo.Location = New-Object System.Drawing.Point(18, 6)
 $cabecalho.Controls.Add($lblTitulo)
 
 $lblSub = New-Object System.Windows.Forms.Label
-$lblSub.Text = 'PERFORMANCE MAXIMA  ' + [char]0x2022 + '  DISCO  ' + [char]0x2022 + '  REDE  ' + [char]0x2022 + '  JOGOS'
+$lblSub.Text = 'DIAGNOSTICO  ' + [char]0x2022 + '  OTIMIZACAO  ' + [char]0x2022 + '  MANUTENCAO'
 $lblSub.AutoSize = $true
 $lblSub.Font = (Fonte 'Segoe UI' 8.5 'Bold')
 $lblSub.ForeColor = (ParaCor $script:Paleta.Cian)
@@ -1020,7 +1096,7 @@ $script:Form.Controls.Add($cabecalho)
 
 # ---------- Navegacao ----------
 $itensNav = @(
-    @('inicio', 'PAINEL'), @('desempenho', 'DESEMPENHO'), @('disco', 'DISCO'),
+    @('inicio', 'PAINEL'), @('diagnostico', 'DIAGNOSTICO'), @('desempenho', 'DESEMPENHO'), @('disco', 'DISCO'),
     @('rede', 'REDE'), @('jogos', 'JOGOS'), @('monitor', 'MONITOR'), @('agenda', 'AGENDAR')
 )
 $y = 18
@@ -1051,6 +1127,55 @@ $lblVersao.Font = (Fonte 'Segoe UI' 8 'Regular')
 $lblVersao.ForeColor = (ParaCor $script:Paleta.Mudo)
 $lblVersao.Location = New-Object System.Drawing.Point(24, 420)
 $lateral.Controls.Add($lblVersao)
+
+
+# ---------- Pagina: DIAGNOSTICO ----------
+$pgDiag = Nova-Pagina 'diagnostico' 'DIAGNOSTICO DE DEFEITOS' 'Coleta inicial do hardware e Windows, com laudo e orcamento para o cliente.'
+$pgDiag.Controls.Add((Novo-Botao "EXECUTAR DIAGNOSTICO - CPU, RAM, Windows, GPU e discos" { Executar-DiagnosticoHS } $script:Paleta.Cian 430 56))
+$pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
+$script:DiagResultados = New-Object System.Windows.Forms.RichTextBox
+$script:DiagResultados.Size = New-Object System.Drawing.Size(790, 180)
+$script:DiagResultados.ReadOnly = $true
+$script:DiagResultados.BackColor = (ParaCor '#07070C')
+$script:DiagResultados.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:DiagResultados.Font = (Fonte 'Consolas' 9 'Regular')
+$script:DiagResultados.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 18)
+$pgDiag.Controls.Add($script:DiagResultados)
+$pgDiag.SetFlowBreak($script:DiagResultados, $true)
+Nova-Secao $pgDiag 'DADOS DO CLIENTE E ORCAMENTO'
+function Novo-CampoDiag {
+    param([int]$Largura = 360, [int]$Altura = 28, [bool]$Multiline = $false)
+    $tb = New-Object System.Windows.Forms.TextBox
+    $tb.Width = $Largura; $tb.Height = $Altura; $tb.Multiline = $Multiline
+    if ($Multiline) { $tb.ScrollBars = 'Vertical' }
+    $tb.Font = (Fonte 'Segoe UI' 10 'Regular')
+    $tb.BackColor = (ParaCor $script:Paleta.Painel)
+    $tb.ForeColor = (ParaCor $script:Paleta.Texto)
+    $tb.BorderStyle = 'FixedSingle'
+    $tb.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 10)
+    return $tb
+}
+$script:DiagCliente = Novo-CampoDiag 360
+$script:DiagContato = Novo-CampoDiag 360
+$script:DiagCliente.AccessibleName = 'Nome do cliente'
+$script:DiagContato.AccessibleName = 'Contato do cliente'
+$pgDiag.Controls.Add($script:DiagCliente); $pgDiag.Controls.Add($script:DiagContato)
+$script:DiagSintoma = Novo-CampoDiag 735 48 $true
+$script:DiagSintoma.AccessibleName = 'Sintoma relatado'
+$pgDiag.Controls.Add($script:DiagSintoma); $pgDiag.SetFlowBreak($script:DiagSintoma, $true)
+$script:DiagServico = Novo-CampoDiag 735 36 $true
+$script:DiagServico.AccessibleName = 'Servico recomendado'
+$pgDiag.Controls.Add($script:DiagServico); $pgDiag.SetFlowBreak($script:DiagServico, $true)
+$script:DiagPecas = Novo-CampoDiag 170
+$script:DiagPecas.Text = '0,00'; $script:DiagPecas.AccessibleName = 'Valor das pecas'
+$script:DiagMaoObra = Novo-CampoDiag 170
+$script:DiagMaoObra.Text = '0,00'; $script:DiagMaoObra.AccessibleName = 'Valor da mao de obra'
+$pgDiag.Controls.Add($script:DiagPecas); $pgDiag.Controls.Add($script:DiagMaoObra)
+$script:DiagObs = Novo-CampoDiag 735 70 $true
+$script:DiagObs.AccessibleName = 'Observacoes do laudo'
+$pgDiag.Controls.Add($script:DiagObs); $pgDiag.SetFlowBreak($script:DiagObs, $true)
+$pgDiag.Controls.Add((Novo-Botao "GERAR LAUDO E ORCAMENTO" { Gerar-LaudoHS } $script:Paleta.Rosa 430 56))
+$pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 
 # ---------- Pagina: PAINEL ----------
 $pgInicio = Nova-Pagina 'inicio' 'PAINEL' 'Visao geral do seu PC em tempo real. Tudo que altera o sistema tem backup e pode ser desfeito.'
