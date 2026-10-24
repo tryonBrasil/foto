@@ -1,11 +1,12 @@
-name: Build Otimizador Gamer EXE
+name: Build HS Tech Otimizador Gamer EXE
 
 on:
   push:
     branches: [main]
     paths:
-      - 'OtimizadorGamer.ps1'
-      - 'Iniciar-Otimizador.bat'
+      - 'codigo-fonte/OtimizadorGamer.ps1'
+      - 'Exemplo_Relatorio.html'
+      - 'LEIA-ME.txt'
       - '.github/workflows/build-otimizador.yml'
   workflow_dispatch:
 
@@ -22,7 +23,8 @@ jobs:
       - name: Validar sintaxe PowerShell
         shell: powershell
         run: |
-          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.ps1'
+          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
+          if (!(Test-Path $arquivo)) { throw "Script principal não encontrado: $arquivo" }
           $tokens = $null
           $erros = $null
           [System.Management.Automation.Language.Parser]::ParseFile($arquivo, [ref]$tokens, [ref]$erros) | Out-Null
@@ -42,21 +44,25 @@ jobs:
       - name: Gerar executavel
         shell: powershell
         run: |
-          Invoke-PS2EXE -inputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.ps1" -outputFile "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe" -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS Tech - Central de Ferramentas" -company "HS Tech" -product "HS Tech Diagnostico e Otimizacao" -version "2.1.0.0"
-          if (!(Test-Path "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe")) { throw 'O executavel nao foi gerado.' }
+          $script = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe'
+          Invoke-PS2EXE -inputFile $script -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS Tech - Central de Ferramentas" -company "HS Tech" -product "HS Tech Diagnostico e Otimizacao" -version "2.1.0.0"
+          if (!(Test-Path $exe)) { throw 'O executavel nao foi gerado.' }
 
       - name: Preparar pacote
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\pacote" -Force | Out-Null
-          Copy-Item "$env:GITHUB_WORKSPACE\OtimizadorGamer.exe" "$env:GITHUB_WORKSPACE\pacote\"
-          Copy-Item "$env:GITHUB_WORKSPACE\Iniciar-Otimizador.bat" "$env:GITHUB_WORKSPACE\pacote\"
-          Copy-Item "$env:GITHUB_WORKSPACE\OtimizadorGamer.ps1" "$env:GITHUB_WORKSPACE\pacote\"
+          $pacote = Join-Path $env:GITHUB_WORKSPACE 'pacote'
+          New-Item -ItemType Directory -Path $pacote -Force | Out-Null
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe') $pacote
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1') $pacote
+          if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt') $pacote }
+          if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html') $pacote }
 
       - name: Publicar pacote para download
         uses: actions/upload-artifact@v4
         with:
-          name: OtimizadorGamer-Windows
+          name: HS-Tech-Otimizador-Windows
           path: pacote/
           if-no-files-found: error
           retention-days: 14
