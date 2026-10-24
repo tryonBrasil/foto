@@ -21,7 +21,7 @@ jobs:
       - name: Validar sintaxe PowerShell
         shell: powershell
         run: |
-          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\\OtimizadorGamer.ps1'
+          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
           $tokens = $null
           $erros = $null
           [System.Management.Automation.Language.Parser]::ParseFile($arquivo, [ref]$tokens, [ref]$erros) | Out-Null
