@@ -3386,7 +3386,8 @@ $lateral.Controls.Add($bordaLateral)
 # ---------- Rodape: registro de atividades ----------
 $rodape = New-Object System.Windows.Forms.Panel
 $rodape.Dock = 'Bottom'
-$rodape.Height = 176
+$rodape.Height = 36
+$rodape.Tag = 'Recolhido'
 $rodape.BackColor = (ParaCor '#050C16')
 $script:Form.Controls.Add($rodape)
 
@@ -3397,6 +3398,7 @@ $script:TxtLog.BorderStyle = 'None'
 $script:TxtLog.BackColor = (ParaCor '#050C16')
 $script:TxtLog.ForeColor = (ParaCor '#A9BBD0')
 $script:TxtLog.Font = (Fonte 'Consolas' 9 'Regular')
+$script:TxtLog.Visible = $false
 $rodape.Controls.Add($script:TxtLog)
 
 $barraLog = New-Object System.Windows.Forms.Panel
@@ -3404,12 +3406,28 @@ $barraLog.Dock = 'Top'
 $barraLog.Height = 30
 $barraLog.BackColor = (ParaCor '#0A1626')
 $lblLog = New-Object System.Windows.Forms.Label
-$lblLog.Text = 'REGISTRO DE ATIVIDADES'
+$lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+$lblLog.Cursor = [System.Windows.Forms.Cursors]::Hand
 $lblLog.AutoSize = $true
 $lblLog.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
 $lblLog.ForeColor = (ParaCor $script:Paleta.Mudo)
 $lblLog.Location = New-Object System.Drawing.Point(20, 8)
 $barraLog.Controls.Add($lblLog)
+$alternarLog = {
+    if ($rodape.Tag -eq 'Recolhido') {
+        $rodape.Height = 170
+        $rodape.Tag = 'Expandido'
+        $script:TxtLog.Visible = $true
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [-]'
+    } else {
+        $rodape.Height = 36
+        $rodape.Tag = 'Recolhido'
+        $script:TxtLog.Visible = $false
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+    }
+}
+$lblLog.Add_Click($alternarLog)
+$barraLog.Add_Click($alternarLog)
 $btnLimparLog = New-Object System.Windows.Forms.Button
 $btnLimparLog.Text = 'LIMPAR'
 $btnLimparLog.Dock = 'Right'
