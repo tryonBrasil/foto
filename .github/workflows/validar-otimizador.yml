@@ -1,10 +1,10 @@
-name: Validar Otimizador Gamer
+name: Validar HS-Tech
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'OtimizadorGamer.ps1'
+      - 'codigo-fonte/OtimizadorGamer.ps1'
       - '.github/workflows/validar-otimizador.yml'
   workflow_dispatch:
 
@@ -21,7 +21,7 @@ jobs:
       - name: Validar sintaxe PowerShell
         shell: powershell
         run: |
-          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.ps1'
+          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\\OtimizadorGamer.ps1'
           $tokens = $null
           $erros = $null
           [System.Management.Automation.Language.Parser]::ParseFile($arquivo, [ref]$tokens, [ref]$erros) | Out-Null
@@ -41,7 +41,8 @@ jobs:
             @{ Nome = 'Backup DNS por adaptador'; Regex = 'DNSOriginal\|\$\(\$a\.ifIndex\)' },
             @{ Nome = 'Restauracao DNS'; Regex = 'Set-DnsClientServerAddress -InterfaceIndex \$indice' },
             @{ Nome = 'Confirma plano de energia'; Regex = 'Plano Alto desempenho ativado e confirmado' },
-            @{ Nome = 'Aviso sensores AMD/Intel'; Regex = 'ainda nao le sensores desses fabricantes' }
+            @{ Nome = 'Tratamento da bateria em notebook'; Regex = 'BatteryFullChargedCapacity|BatteryStaticData' },
+            @{ Nome = 'Identidade HS-Tech'; Regex = 'HS-TECH - CENTRAL DE FERRAMENTAS' }
           )
           $falhas = @()
           foreach ($v in $verificacoes) {
