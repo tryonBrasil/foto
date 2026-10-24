@@ -705,57 +705,77 @@ function Obter-EspacoNaoAlocadoDisco {
 }
 
 function Criar-ParticaoBackup {
- try {
-   if(-not (Get-Command Get-Disk -ErrorAction SilentlyContinue) -or -not (Get-Command Get-Partition -ErrorAction SilentlyContinue)){
-     [void][Windows.Forms.MessageBox]::Show('Este Windows não disponibilizou as ferramentas de verificação de discos. Execute o HS-Tech como administrador e tente novamente.','HS-Tech - Verificar unidade','OK','Warning');return
-   }
-   Log 'Verificando discos, partições e espaço realmente não alocado...' Cyan
-   $discos=@(Get-Disk -ErrorAction Stop | Where-Object {$_.OperationalStatus -contains 'Online' -and -not $_.IsBoot -and -not $_.IsSystem})
-   if(!$discos.Count){$discos=@(Get-Disk -ErrorAction Stop | Where-Object {$_.OperationalStatus -contains 'Online'})}
-   $analises=@()
-   foreach($d in $discos){
-     $a=Obter-EspacoNaoAlocadoDisco -Disco $d
-     $analises+= $a
-     $totalGB=[math]::Round($a.TotalNaoAlocado/1GB,2)
-     $maiorGB=if($a.MaiorIntervalo){[math]::Round($a.MaiorIntervalo.Tamanho/1GB,2)}else{0}
-     Log ("Disco {0} ({1}): espaço não alocado total {2:N2} GB; maior bloco contínuo {3:N2} GB; estado {4}" -f $d.Number,$d.FriendlyName,$totalGB,$maiorGB,$d.OperationalStatus) $(if($maiorGB -ge 5){'Green'}else{'Yellow'})
-   }
-   if(!$analises.Count){[void][Windows.Forms.MessageBox]::Show('Nenhuma unidade online foi encontrada.','HS-Tech - Verificar unidade','OK','Information');return}
-   $nl=[Environment]::NewLine
-   $linhas=@()
-   foreach($a in $analises){
-     $d=$a.Disco
-     $livreGB=[math]::Round($a.TotalNaoAlocado/1GB,2)
-     $maiorGB=if($a.MaiorIntervalo){[math]::Round($a.MaiorIntervalo.Tamanho/1GB,2)}else{0}
-     $linhas+=("Disco {0} - {1}{6}  Capacidade: {2:N2} GB | Partições: {3}{6}  Espaço não alocado total: {4:N2} GB{6}  Maior bloco contínuo disponível: {5:N2} GB" -f $d.Number,$d.FriendlyName,($d.Size/1GB),$a.Particoes.Count,$livreGB,$maiorGB,$nl)
-   }
-   $relatorio=$linhas -join ($nl+$nl)
-   [void][Windows.Forms.MessageBox]::Show(("Verificação concluída. O espaço total não alocado pode estar dividido em blocos; para criar uma partição conta o maior bloco contínuo."+$nl+$nl+$relatorio),'HS-Tech - Resultado da verificação','OK','Information')
-   $elegiveis=@($analises|Where-Object {$_.MaiorIntervalo -and $_.MaiorIntervalo.Tamanho -ge 5GB})
-   if(!$elegiveis.Count){[void][Windows.Forms.MessageBox]::Show('Nenhum disco possui um bloco contínuo de pelo menos 5 GB não alocados. O HS-Tech não vai reduzir nem formatar partições existentes. Se necessário, abra Gerenciamento de Disco e libere espaço não alocado primeiro.','HS-Tech - Sem espaço suficiente','OK','Warning');return}
-   $opcoes=($elegiveis|ForEach-Object {"$($_.Disco.Number) - $($_.Disco.FriendlyName) (máximo aprox. $([math]::Round($_.MaiorIntervalo.Tamanho/1GB,2)) GB)"}) -join $nl
-   $n=[Microsoft.VisualBasic.Interaction]::InputBox(("Digite o número do disco para criar a partição no espaço não alocado:"+$nl+$nl+$opcoes),'HS-Tech - Escolher disco','')
-   if([string]::IsNullOrWhiteSpace($n) -or $n -notmatch '^\d+$'){return}
-   $selecionado=@($elegiveis|Where-Object {$_.Disco.Number -eq [int]$n})|Select-Object -First 1
-   if(!$selecionado){[void][Windows.Forms.MessageBox]::Show('Número inválido ou disco sem espaço contínuo suficiente. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
-   $discoAtual=Get-Disk -Number ([int]$n) -ErrorAction Stop
-   if($discoAtual.IsReadOnly -or $discoAtual.IsOffline){[void][Windows.Forms.MessageBox]::Show('O disco está offline ou somente leitura. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
-   $atual=Obter-EspacoNaoAlocadoDisco -Disco $discoAtual
-   if(!$atual.MaiorIntervalo -or $atual.MaiorIntervalo.Tamanho -lt 5GB){[void][Windows.Forms.MessageBox]::Show('O espaço disponível mudou e agora é menor que 5 GB. Faça a verificação novamente.','HS-Tech','OK','Warning');return}
-   $maxGB=[math]::Round($atual.MaiorIntervalo.Tamanho/1GB,2)
-   if(!(Confirmar "Verificação atualizada: o maior bloco contínuo não alocado do disco $n é de aproximadamente $maxGB GB. Criar uma partição NTFS usando esse espaço? Somente o espaço não alocado será usado; partições existentes não serão formatadas.")){return}
-   $p=New-Partition -DiskNumber ([int]$n) -UseMaximumSize -AssignDriveLetter -ErrorAction Stop
-   $v=Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
-   $script:BackupDestino=$v.DriveLetter+':\'
-   $script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino
-   Log ("Partição HS-TECH-BACKUP criada em {0} usando o espaço não alocado verificado (máximo aproximado {1:N2} GB)." -f $script:BackupDestino,$maxGB) Green
-   [void][Windows.Forms.MessageBox]::Show(("Partição criada e formatada em NTFS."+$nl+"Destino: "+$script:BackupDestino+$nl+"Tamanho aproximado: "+$maxGB+" GB"+$nl+$nl+"Atenção: uma partição no mesmo disco não protege contra falha física nem contra formatação do disco inteiro."),'HS-Tech - Partição criada','OK','Information')
- } catch {
-   Log ("Erro ao verificar/criar partição: {0}" -f $_.Exception.Message) Red
-   [void][Windows.Forms.MessageBox]::Show("Não foi possível verificar ou criar a partição:"+[Environment]::NewLine+$($_.Exception.Message),'HS-Tech - Erro','OK','Error')
- }
+  $nl=[Environment]::NewLine
+  try {
+    foreach($cmd in @('Get-Partition','Get-Volume','Get-PartitionSupportedSize','Resize-Partition','New-Partition','Format-Volume')) {
+      if(-not (Get-Command $cmd -ErrorAction SilentlyContinue)){[void][Windows.Forms.MessageBox]::Show("O Windows não disponibilizou o comando $cmd. Execute o HS-Tech como administrador e tente novamente.",'HS-Tech - Verificação de partição','OK','Warning');return}
+    }
+    Log 'Analisando volumes e limite de redução informado pelo Windows...' Cyan
+    $candidatos=@()
+    foreach($part in @(Get-Partition -ErrorAction Stop | Where-Object {$_.DriveLetter -and $_.Type -notin @('System','Reserved','Recovery') -and -not $_.IsSystem -and -not $_.IsBoot})) {
+      try {
+        $vol=Get-Volume -DriveLetter $part.DriveLetter -ErrorAction Stop
+        if($vol.FileSystem -ne 'NTFS' -or $vol.Size -le 0){continue}
+        $disk=Get-Disk -Number $part.DiskNumber -ErrorAction Stop
+        if($disk.IsOffline -or $disk.IsReadOnly -or $disk.PartitionStyle -eq 'RAW'){continue}
+        $supported=Get-PartitionSupportedSize -DiskNumber $part.DiskNumber -PartitionNumber $part.PartitionNumber -ErrorAction Stop
+        $max=[math]::Max(0,[long]$part.Size-[long]$supported.SizeMin)
+        $free=[long]$vol.SizeRemaining
+        # Sugestão conservadora: no máximo metade do limite aceito pelo Windows e metade do espaço livre atual.
+        $recomendado=[long]([math]::Floor([math]::Min(($max*0.5),($free*0.5))/1GB)*1GB)
+        if($max -ge 1GB) {
+          $item=[pscustomobject]@{Particao=$part;Volume=$vol;Disco=$disk;Suportado=$supported;MaxReducao=$max;Livre=$free;Recomendado=$recomendado}
+          $candidatos+= $item
+          Log ("Volume {0}: tamanho {1:N2} GB; livre {2:N2} GB; máximo de redução informado pelo Windows {3:N2} GB; sugestão conservadora {4:N2} GB." -f ($part.DriveLetter+':'),($part.Size/1GB),($free/1GB),($max/1GB),($recomendado/1GB)) Cyan
+        }
+      } catch { Log ("Volume {0}: não foi possível avaliar a redução: {1}" -f $part.DriveLetter,$_.Exception.Message) Yellow }
+    }
+    if(!$candidatos.Count){[void][Windows.Forms.MessageBox]::Show('Nenhum volume NTFS de dados foi encontrado com pelo menos 1 GB de redução suportada. O HS-Tech não alterou nenhum disco.','HS-Tech - Sem opção segura','OK','Information');return}
+    $opcoes=foreach($c in $candidatos){"Unidade $($c.Particao.DriveLetter): | Disco $($c.Disco.Number) - $($c.Disco.FriendlyName) | Tamanho $([math]::Round($c.Particao.Size/1GB,2)) GB | Livre $([math]::Round($c.Livre/1GB,2)) GB | Máximo Windows $([math]::Round($c.MaxReducao/1GB,2)) GB | Sugestão $([math]::Round($c.Recomendado/1GB,2)) GB"}
+    $escolha=[Microsoft.VisualBasic.Interaction]::InputBox(('AVALIAÇÃO DE REDUÇÃO'+$nl+$nl+($opcoes -join $nl)+$nl+$nl+'Digite a letra da unidade que deseja reduzir (ex.: D). Nenhuma alteração ocorrerá nesta etapa.'),'HS-Tech - Escolher volume','')
+    if([string]::IsNullOrWhiteSpace($escolha)){return}
+    $letra=$escolha.Trim().TrimEnd(':').ToUpperInvariant()
+    $sel=@($candidatos | Where-Object {$_.Particao.DriveLetter.ToString().ToUpperInvariant() -eq $letra}) | Select-Object -First 1
+    if(!$sel){[void][Windows.Forms.MessageBox]::Show('Unidade inválida. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
+    # Reavaliar imediatamente antes de alterar para evitar usar uma estimativa desatualizada.
+    $partAtual=Get-Partition -DiskNumber $sel.Particao.DiskNumber -PartitionNumber $sel.Particao.PartitionNumber -ErrorAction Stop
+    $volAtual=Get-Volume -DriveLetter $sel.Particao.DriveLetter -ErrorAction Stop
+    $limiteAtual=Get-PartitionSupportedSize -DiskNumber $partAtual.DiskNumber -PartitionNumber $partAtual.PartitionNumber -ErrorAction Stop
+    $maxAtual=[math]::Max(0,[long]$partAtual.Size-[long]$limiteAtual.SizeMin)
+    $livreAtual=[long]$volAtual.SizeRemaining
+    $sugestaoAtual=[long]([math]::Floor([math]::Min(($maxAtual*0.5),($livreAtual*0.5))/1GB)*1GB)
+    if($maxAtual -lt 1GB){[void][Windows.Forms.MessageBox]::Show('O limite de redução mudou e agora é inferior a 1 GB. Nada foi alterado.','HS-Tech','OK','Warning');return}
+    $prompt=('Unidade {0}: tamanho atual {1:N2} GB; espaço livre {2:N2} GB.'+$nl+'Máximo de redução que o Windows informa ser suportado: {3:N2} GB.'+$nl+'Sugestão conservadora (metade do máximo e do espaço livre): {4:N2} GB.'+$nl+$nl+'Digite quantos GB deseja separar para a nova partição. O valor precisa ser menor ou igual ao máximo suportado. Para reduzir o risco, prefira a sugestão conservadora.' -f $letra,($partAtual.Size/1GB),($livreAtual/1GB),($maxAtual/1GB),($sugestaoAtual/1GB))
+    $entrada=[Microsoft.VisualBasic.Interaction]::InputBox($prompt,'HS-Tech - Espaço a reduzir',([math]::Round($sugestaoAtual/1GB,2)).ToString([Globalization.CultureInfo]::InvariantCulture))
+    if([string]::IsNullOrWhiteSpace($entrada)){return}
+    $gb=0.0
+    $normalizado=$entrada.Trim().Replace(',','.')
+    if(-not [double]::TryParse($normalizado,[Globalization.NumberStyles]::AllowDecimalPoint,[Globalization.CultureInfo]::InvariantCulture,[ref]$gb) -or $gb -le 0){[void][Windows.Forms.MessageBox]::Show('Digite um número de GB válido, maior que zero. Nenhuma alteração foi feita.','HS-Tech','OK','Warning');return}
+    $bytes=[long]([math]::Floor(($gb*1GB)/1MB)*1MB)
+    if($bytes -gt $maxAtual){[void][Windows.Forms.MessageBox]::Show(('O valor informado excede o máximo que o Windows suporta agora ({0:N2} GB). Nada foi alterado.' -f ($maxAtual/1GB)),'HS-Tech','OK','Warning');return}
+    $tamanhoNovo=[long]$partAtual.Size-$bytes
+    if($tamanhoNovo -lt [long]$limiteAtual.SizeMin){[void][Windows.Forms.MessageBox]::Show('O tamanho final ficaria abaixo do limite suportado pelo Windows. Nada foi alterado.','HS-Tech','OK','Warning');return}
+    $confirmacao=('ATENÇÃO: a unidade {0}: será reduzida em {1:N2} GB.'+$nl+'O tamanho atual passará de {2:N2} GB para aproximadamente {3:N2} GB.'+$nl+'O Windows informa que a redução é suportada, mas isso não garante risco zero. Faça backup dos arquivos importantes antes de continuar.'+$nl+$nl+'Após reduzir, o HS-Tech criará uma NOVA partição no espaço liberado e formatará somente essa nova partição em NTFS. Confirme o disco e os dados antes de prosseguir.' -f $letra,($bytes/1GB),($partAtual.Size/1GB),($tamanhoNovo/1GB))
+    if(-not (Confirmar $confirmacao)){return}
+    Log ("Reduzindo a unidade {0}: em {1:N2} GB após validação do Windows..." -f $letra,($bytes/1GB)) Cyan
+    Resize-Partition -DiskNumber $partAtual.DiskNumber -PartitionNumber $partAtual.PartitionNumber -Size $tamanhoNovo -ErrorAction Stop
+    Start-Sleep -Milliseconds 700
+    $discoDepois=Get-Disk -Number $partAtual.DiskNumber -ErrorAction Stop
+    $analiseDepois=Obter-EspacoNaoAlocadoDisco -Disco $discoDepois
+    $bloco=$null
+    foreach($iv in $analiseDepois.Intervalos){if($null -eq $bloco -or $iv.Tamanho -gt $bloco.Tamanho){$bloco=$iv}}
+    if(!$bloco -or $bloco.Tamanho -lt 1GB){[void][Windows.Forms.MessageBox]::Show('O volume foi reduzido, mas o Windows não apresentou um bloco contíguo suficiente para criar a nova partição. Nenhum volume existente foi formatado. Abra Gerenciamento de Disco para avaliar o espaço liberado.','HS-Tech - Espaço liberado','OK','Warning');return}
+    $novo=New-Partition -DiskNumber $partAtual.DiskNumber -UseMaximumSize -AssignDriveLetter -ErrorAction Stop
+    $fmt=Format-Volume -Partition $novo -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
+    $script:BackupDestino=$fmt.DriveLetter+':\'
+    $script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino
+    Log ("Criada partição HS-TECH-BACKUP em {0}; volume original {1}: reduzido em {2:N2} GB." -f $script:BackupDestino,$letra,($bytes/1GB)) Green
+    [void][Windows.Forms.MessageBox]::Show(('Concluído.'+$nl+'Volume original: '+$letra+':'+$nl+'Redução solicitada: '+[math]::Round($bytes/1GB,2)+' GB'+$nl+'Nova partição formatada em NTFS: '+$script:BackupDestino+$nl+$nl+'A partição original não foi formatada. Mesmo assim, redimensionar partições nunca é risco zero. Mantenha uma cópia dos dados importantes em outro disco físico.'),'HS-Tech - Partição criada','OK','Information')
+  } catch {
+    Log ("Erro ao avaliar/reduzir/criar partição: {0}" -f $_.Exception.Message) Red
+    [void][Windows.Forms.MessageBox]::Show(('Não foi possível concluir a operação. Verifique Gerenciamento de Disco e os dados antes de tentar novamente. Erro: '+$nl+$($_.Exception.Message)),'HS-Tech - Erro','OK','Error')
+  }
 }
-
 function Localizar-PastaProgramas {$c=@();if($env:LOCALAPPDATA){$c+=(Join-Path (Join-Path $env:LOCALAPPDATA 'HS-Tech') 'programas')};if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path $PSScriptRoot 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path $b 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
 function Ler-BibliotecaProgramas {$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$f=Join-Path (Join-Path $b 'HS-Tech') 'programas.json';if(Test-Path $f){try{return @((Get-Content $f -Raw -Encoding UTF8|ConvertFrom-Json))}catch{}};return @()}
 function Salvar-BibliotecaProgramas {try{$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$d=Join-Path $b 'HS-Tech';if(!(Test-Path $d)){[void](New-Item -ItemType Directory -Path $d -Force)};ConvertTo-Json -InputObject @($script:BibliotecaProgramas) -Depth 4|Set-Content (Join-Path $d 'programas.json') -Encoding UTF8}catch{Log "Falha ao salvar biblioteca: $($_.Exception.Message)" Red}}
