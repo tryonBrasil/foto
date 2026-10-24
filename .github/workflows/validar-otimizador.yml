@@ -54,8 +54,13 @@ jobs:
             if ($codigo -notmatch $v.Regex) { $falhas += $v.Nome }
             else { Write-Host ("OK: " + $v.Nome) }
           }
-          if ($codigo -match 'Clear-RecycleBin|LOCALAPPDATA\\NVIDIA\\DXCache|LOCALAPPDATA\\AMD\\DxCache') {
-            $falhas += 'A limpeza ainda inclui Lixeira ou caches de shaders'
+          # Verifica apenas a rotina de limpeza temporaria. A limpeza profunda
+          # tem uma opcao separada de Lixeira, escolhida explicitamente pelo usuario.
+          $rotinaLimpeza = [regex]::Match($codigo, '(?s)function\s+Limpar-Temporarios\b.*?(?=\r?\nfunction\s+|\z)').Value
+          if (-not $rotinaLimpeza) {
+            $falhas += 'Rotina Limpar-Temporarios nao encontrada'
+          } elseif ($rotinaLimpeza -match 'Clear-RecycleBin|LOCALAPPDATA\\NVIDIA\\DXCache|LOCALAPPDATA\\AMD\\DxCache') {
+            $falhas += 'A limpeza temporaria inclui Lixeira ou caches de shaders'
           }
           if ($falhas.Count -gt 0) {
             $falhas | ForEach-Object { Write-Error ("Falhou: " + $_) }
