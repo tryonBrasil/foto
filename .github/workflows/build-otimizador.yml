@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'codigo-fonte/OtimizadorGamer.ps1'
+      - 'programas/**'
       - 'Exemplo_Relatorio.html'
       - 'LEIA-ME.txt'
       - '.github/workflows/build-otimizador.yml'
@@ -20,11 +21,45 @@ jobs:
       - name: Baixar codigo
         uses: actions/checkout@v4
 
+      - name: Preparar programas para incorporar ao EXE
+        shell: powershell
+        run: |
+          $origem = Join-Path $env:GITHUB_WORKSPACE 'programas'
+          $staging = Join-Path $env:RUNNER_TEMP 'HS-Tech-programas'
+          $zip = Join-Path $env:RUNNER_TEMP 'HS-Tech-programas.zip'
+          if (!(Test-Path $origem)) { throw "Pasta programas não encontrada: $origem" }
+          Remove-Item $staging, $zip -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Get-ChildItem -LiteralPath $origem -Recurse -File | ForEach-Object {
+            if ($_.Name -in @('Activator.cmd','removeedge.bat')) {
+              Write-Host ("Ignorado por segurança: " + $_.FullName)
+              return
+            }
+            $relativo = $_.FullName.Substring($origem.Length).TrimStart('\','/')
+            $destino = Join-Path $staging $relativo
+            New-Item -ItemType Directory -Path (Split-Path $destino -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destino
+          }
+          if (!(Get-ChildItem -LiteralPath $staging -Recurse -File | Where-Object { $_.Extension -in @('.exe','.cmd','.bat','.reg','.appx') })) {
+            throw 'Nenhum programa compatível foi preparado.'
+          }
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+          $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($zip))
+          $scriptOrigem = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
+          $scriptBuild = Join-Path $env:RUNNER_TEMP 'OtimizadorGamer-empacotado.ps1'
+          $conteudo = [IO.File]::ReadAllText($scriptOrigem)
+          $marcador = '__HS_TECH_PROGRAMAS_BASE64__'
+          if (!$conteudo.Contains($marcador)) { throw 'Marcador de incorporação dos programas não encontrado no código.' }
+          $conteudo = $conteudo.Replace($marcador, $base64)
+          [IO.File]::WriteAllText($scriptBuild, $conteudo, (New-Object System.Text.UTF8Encoding($true)))
+          "SCRIPT_BUILD=$scriptBuild" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ("Programas incorporados ao script de compilação. ZIP: " + [math]::Round((Get-Item $zip).Length / 1MB, 2) + " MB")
+
       - name: Validar sintaxe PowerShell
         shell: powershell
         run: |
-          $arquivo = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
-          if (!(Test-Path $arquivo)) { throw "Script principal não encontrado: $arquivo" }
+          $arquivo = $env:SCRIPT_BUILD
+          if (!(Test-Path $arquivo)) { throw "Script de compilação não encontrado: $arquivo" }
           $tokens = $null
           $erros = $null
           [System.Management.Automation.Language.Parser]::ParseFile($arquivo, [ref]$tokens, [ref]$erros) | Out-Null
@@ -41,28 +76,26 @@ jobs:
           Install-Module ps2exe -Scope CurrentUser -Force
           Import-Module ps2exe
 
-      - name: Gerar executavel
+      - name: Gerar executavel unico e portatil
         shell: powershell
         run: |
-          $script = Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1'
           $exe = Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe'
-          Invoke-PS2EXE -inputFile $script -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS-Tech - Central de Ferramentas" -company "HS-Tech" -product "HS-Tech Diagnostico e Otimizacao" -version "3.4.0.0"
+          Invoke-PS2EXE -inputFile $env:SCRIPT_BUILD -outputFile $exe -noConsole -x64 -requireAdmin -STA -DPIAware -title "HS-Tech - Central de Ferramentas" -company "HS-Tech" -product "HS-Tech Diagnostico e Otimizacao" -version "3.5.0.0"
           if (!(Test-Path $exe)) { throw 'O executavel nao foi gerado.' }
 
-      - name: Preparar pacote
+      - name: Preparar pacote portatil
         shell: powershell
         run: |
           $pacote = Join-Path $env:GITHUB_WORKSPACE 'pacote'
           New-Item -ItemType Directory -Path $pacote -Force | Out-Null
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.exe') $pacote
-          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1') $pacote
           if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LEIA-ME.txt') $pacote }
           if (Test-Path (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html')) { Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'Exemplo_Relatorio.html') $pacote }
 
       - name: Publicar pacote para download
         uses: actions/upload-artifact@v4
         with:
-          name: HS-Tech-Otimizador-Windows
+          name: HS-Tech-Portatil-EXE-Unico
           path: pacote/
           if-no-files-found: error
           retention-days: 14
