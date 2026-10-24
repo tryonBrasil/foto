@@ -1743,34 +1743,57 @@ function Verificar-Drivers {
 function Saude-Bateria {
     param([bool]$Abrir = $true)
     Log '--- Saúde da bateria ---' Cyan
-    if (-not (Tem-Bateria)) {
-        Log 'Nenhuma bateria detectada (desktop).' Gray
-        Adicionar-Achado 'Bateria' 'Nenhuma bateria detectada (computador de mesa).' 'info'
-        return
-    }
-    try {
-        $full = (Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryFullChargedCapacity -ErrorAction Stop | Select-Object -First 1).FullChargedCapacity
-        $proj = (Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryStaticData -ErrorAction Stop | Select-Object -First 1).DesignedCapacity
-        if ($full -and $proj) {
-            $saude = [int][math]::Round(100 * $full / $proj)
-            Log ("Capacidade atual: {0} mWh de {1} mWh de projeto ({2}%)." -f $full, $proj, $saude)
-            if ($saude -lt 60) { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original: recomenda-se troca." 'erro' }
-            elseif ($saude -lt 80) { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original: desgaste moderado." 'aviso' }
-            else { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original." 'ok' }
+
+    # Alguns notebooks expõem Win32_Battery, mas não publicam as classes
+    # BatteryFullChargedCapacity/BatteryStaticData em root\wmi.
+    $baterias = @()
+    try { $baterias = @(Get-CimInstance -ClassName Win32_Battery -ErrorAction Stop) } catch { }
+    if ($baterias.Count -eq 0) {
+        Log 'O Windows não conseguiu identificar uma bateria por WMI. Vou tentar gerar o relatório nativo.' Yellow
+        Adicionar-Achado 'Bateria' 'Bateria não identificada pelo WMI; confira o relatório de bateria do Windows.' 'aviso'
+    } else {
+        $full = $null
+        $proj = $null
+
+        try {
+            $dadosFull = @(Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryFullChargedCapacity -ErrorAction Stop)
+            if ($dadosFull.Count -gt 0) { $full = $dadosFull[0].FullChargedCapacity }
+        } catch { }
+        try {
+            $dadosProj = @(Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryStaticData -ErrorAction Stop)
+            if ($dadosProj.Count -gt 0) { $proj = $dadosProj[0].DesignedCapacity }
+        } catch { }
+
+        # Fallback para drivers que publicam as capacidades diretamente em Win32_Battery.
+        if (-not $full -and $baterias[0].FullChargeCapacity) { $full = $baterias[0].FullChargeCapacity }
+        if (-not $proj -and $baterias[0].DesignCapacity) { $proj = $baterias[0].DesignCapacity }
+
+        if ($full -and $proj -and [double]$full -gt 0 -and [double]$proj -gt 0) {
+            $saude = [int][math]::Round(100 * [double]$full / [double]$proj)
+            # Valores acima de 100% podem ocorrer por calibração; não são erro de leitura.
+            Log ("Capacidade de carga: {0} mWh; capacidade de projeto: {1} mWh; saúde estimada: {2}%." -f $full, $proj, $saude)
+            if ($saude -lt 60) { Adicionar-Achado 'Bateria' "Bateria com saúde estimada de $saude%: recomenda-se avaliar a troca." 'erro' }
+            elseif ($saude -lt 80) { Adicionar-Achado 'Bateria' "Bateria com saúde estimada de $saude%: desgaste moderado." 'aviso' }
+            else { Adicionar-Achado 'Bateria' "Saúde estimada da bateria: $saude%." 'ok' }
         } else {
-            Log 'O fabricante não informa a capacidade da bateria.' Yellow
+            Log 'O Windows detectou a bateria, mas este driver não disponibiliza a capacidade de carga e/ou a capacidade de projeto via WMI.' Yellow
+            Adicionar-Achado 'Bateria' 'Bateria detectada; capacidade de saúde não fornecida pelo driver. Consulte o relatório de bateria.' 'info'
         }
-    } catch {
-        Log 'Não foi possível ler a capacidade da bateria.' Yellow
     }
+
+    # O relatório nativo pode conter o histórico e as capacidades mesmo quando o WMI falha.
     try {
         $arq = Join-Path $script:Pasta 'bateria.html'
-        powercfg /batteryreport /output $arq | Out-Null
-        if (Test-Path $arq) {
+        $saidaPowerCfg = & powercfg.exe /batteryreport /output $arq 2>&1
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $arq)) {
             Log "Relatório completo de bateria do Windows: $arq" Green
             if ($Abrir) { Start-Process $arq }
+        } else {
+            Log ("O Windows não conseguiu gerar o relatório de bateria: {0}" -f ($saidaPowerCfg -join ' ')) Yellow
         }
-    } catch { }
+    } catch {
+        Log ("Falha ao gerar o relatório de bateria: {0}" -f $_.Exception.Message) Yellow
+    }
 }
 
 function Diagnostico-Seguranca {
