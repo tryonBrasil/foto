@@ -2116,15 +2116,70 @@ function Gerar-RelatorioHTML {
 
 function Relatorio-HTML-Agora {
     if ([string]::IsNullOrWhiteSpace($script:Atendimento.Cliente)) {
-        if (Confirmar "Deseja informar o nome do cliente, o técnico e observações antes de gerar o relatório?`n`nEssas informações aparecem no relatório.") { Editar-DadosAtendimento }
+        if (Confirmar ("Deseja informar o nome do cliente, o técnico e observações antes de gerar o relatório?" + [Environment]::NewLine + [Environment]::NewLine + "Essas informações aparecem no relatório.")) { Editar-DadosAtendimento }
     }
-    $arq = Join-Path ([Environment]::GetFolderPath('Desktop')) ("Relatorio_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+
+    $pastaDestino = [Environment]::GetFolderPath('Desktop')
+    if ([string]::IsNullOrWhiteSpace($pastaDestino) -or -not (Test-Path -LiteralPath $pastaDestino)) {
+        $pastaDestino = [Environment]::GetFolderPath('MyDocuments')
+    }
+    $arq = Join-Path $pastaDestino ("Relatorio_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
     try {
         [void](Gerar-RelatorioHTML $arq)
-        Log "Relatório HTML salvo na Área de Trabalho: $arq" Green
-        Start-Process $arq
+        if (-not (Test-Path -LiteralPath $arq -PathType Leaf)) {
+            throw "O arquivo HTML não foi encontrado após a geração."
+        }
+        Log "Relatório HTML salvo em: $arq" Green
+
+        $abriu = $false
+        try {
+            Start-Process -FilePath $arq -ErrorAction Stop
+            $abriu = $true
+        } catch {
+            Log "O Windows não abriu o HTML pelo aplicativo padrão. Tentando navegador alternativo..." Yellow
+        }
+
+        if (-not $abriu) {
+            $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+            $navegadores = @(
+                (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $pf86 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $pf86 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $env:ProgramFiles 'Mozilla Firefox\firefox.exe'),
+                (Join-Path $pf86 'Mozilla Firefox\firefox.exe')
+            )
+            $navegador = $navegadores | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+            if ($navegador) {
+                try {
+                    Start-Process -FilePath $navegador -ArgumentList @('"' + $arq + '"') -ErrorAction Stop
+                    $abriu = $true
+                } catch {
+                    Log "Não foi possível iniciar o navegador encontrado: $($_.Exception.Message)" Yellow
+                }
+            }
+        }
+
+        if (-not $abriu) {
+            try { Start-Process -FilePath 'explorer.exe' -ArgumentList @('"' + $pastaDestino + '"') -ErrorAction Stop } catch { }
+            [System.Windows.Forms.MessageBox]::Show(
+                ("O relatório foi gerado, mas o Windows não conseguiu abrir um navegador automaticamente." + [Environment]::NewLine + [Environment]::NewLine + "Arquivo salvo em:" + [Environment]::NewLine + $arq + [Environment]::NewLine + [Environment]::NewLine + "Abra esse arquivo manualmente com Edge, Chrome ou Firefox."),
+                'HS-Tech - Relatório gerado',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
     } catch {
-        Log "Não foi possível gerar o relatório HTML: $($_.Exception.Message)" Red
+        Log "Falha ao gerar o relatório HTML: $($_.Exception.Message)" Red
+        [System.Windows.Forms.MessageBox]::Show(
+            ("Não foi possível gerar o relatório HTML." + [Environment]::NewLine + [Environment]::NewLine + "Detalhes: " + $_.Exception.Message),
+            'HS-Tech - Erro no relatório',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
     }
 }
 
