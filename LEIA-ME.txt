@@ -1,14 +1,14 @@
-﻿HS-TECH | HS-Tech v3.4
+﻿HS-TECH | Central de Ferramentas v3.6.0
 =====================
 
 CONTEÚDO DO PACOTE
-  OtimizadorGamer.exe               Programa (executável único)
+  HS-Tech.exe                       Programa (executável único)
   Exemplo_Relatorio.html            Exemplo do relatório para o cliente (dados fictícios)
   codigo-fonte\OtimizadorGamer.ps1  Script completo, editável
   codigo-fonte\Launcher.cs          Código do inicializador do executável
 
 COMO USAR
-  1. Dê dois cliques em OtimizadorGamer.exe e aceite o pedido de administrador.
+  1. Dê dois cliques em HS-Tech.exe e aceite o pedido de administrador.
   2. Painel: acompanhe CPU, RAM, GPU e temperaturas. "Executar manutenção
      recomendada" mostra a lista de etapas para você marcar e executar.
   3. Desempenho: planos de energia (Alto desempenho, Desempenho máximo,
@@ -45,7 +45,7 @@ AVISOS IMPORTANTES
   - O Windows Update só oferece os drivers que ele conhece; nem todo fabricante
     publica lá. Para chipset, placa de vídeo e BIOS, o site do fabricante
     costuma ter versões mais novas.
-  - O código passa por validação automatizada de sintaxe e compilação no GitHub Actions. A abertura, sensores de GPU e funções de manutenção ainda precisam de teste prático em Windows antes de uso em clientes.
+  - O código passa por validação automatizada de sintaxe e compilação no GitHub Actions. A compilação bem-sucedida não substitui testes práticos em Windows: abertura, sensores, bateria, relatórios e funções de manutenção devem ser testados antes do uso em clientes.
   - Em notebooks, prefira o perfil Equilibrado; o Alto desempenho aumenta o
     consumo e a temperatura.
   - O plano Desempenho máximo é um plano oculto do Windows: não economiza
@@ -64,7 +64,8 @@ AVISOS IMPORTANTES
 COMO RECOMPILAR
   A compilação oficial é feita pelo GitHub Actions ao atualizar o script
   codigo-fonte\\OtimizadorGamer.ps1. Abra a aba Actions do repositório e baixe
-  o artefato HS-Tech-Otimizador-Windows da execução concluída.
+  o artefato HS-Tech-Portatil-EXE-Unico da execução concluída. O artefato
+  contém HS-Tech.exe e os arquivos de apoio; os artefatos expiram após 14 dias.
 
 GPU: o programa tenta identificar adaptadores NVIDIA, AMD e Intel. O uso da GPU
 pode ser lido pelos contadores nativos do Windows quando disponíveis. A temperatura
