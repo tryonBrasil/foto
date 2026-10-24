@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # ============================================================
-#  HS-TECH - OTIMIZADOR GAMER v3.4
+#  HS-TECH - CENTRAL DE FERRAMENTAS v3.6
 #  Modulos: painel ao vivo, limpeza, desempenho, perfis por jogo,
 #  disco (saude/verificacao/otimizacao/benchmark), rede + DNS,
 #  GPU/visuais, bloatware, alertas de temperatura, agendamento,
@@ -129,10 +129,10 @@ $script:NavBotoes = New-Object System.Collections.ArrayList
 $script:Paginas = @{}
 
 $script:Paleta = @{
-    Fundo = '#06101F'; Lateral = '#08172A'; Painel = '#0B1D33'; Hover = '#102B49'
-    Neon = '#00E6A0'; Rosa = '#8B5CF6'; Cian = '#16B8FF'; Amarelo = '#FFB020'
+    Fundo = '#090A0D'; Lateral = '#111216'; Painel = '#191B21'; Hover = '#262831'
+    Neon = '#FF2638'; Rosa = '#FF5364'; Cian = '#35B8FF'; Amarelo = '#FFC857'
     Texto = '#EAF4FF'; Mudo = '#91A8C2'
-    Borda = '#16385C'; Trilho = '#0D2440'
+    Borda = '#343640'; Trilho = '#22242B'
 }
 
 # ============================================================
@@ -1273,7 +1273,7 @@ function Agendar-Manutencao {
     try {
         if ($script:EhExe) {
             # Copia o executavel para uma pasta fixa: a tarefa continua funcionando mesmo se o .exe for movido.
-            $destinoExe = Join-Path $script:Pasta 'OtimizadorGamer.exe'
+            $destinoExe = Join-Path $script:Pasta 'HS-Tech.exe'
             if ($script:CaminhoScript -ne $destinoExe) {
                 try { Copy-Item -Path $script:CaminhoScript -Destination $destinoExe -Force -ErrorAction Stop }
                 catch { if (-not (Test-Path $destinoExe)) { throw } }
@@ -1351,7 +1351,7 @@ function Verificar-Jogos {
         Log "Jogo detectado: $rodando" Magenta
         Entrar-ModoPerformance
         Otimizar-ProcessoJogo $rodando
-        $script:Tray.ShowBalloonTip(3000, 'Otimizador Gamer', "Modo Performance ativado para $rodando", [System.Windows.Forms.ToolTipIcon]::Info)
+        $script:Tray.ShowBalloonTip(3000, 'HS-Tech | Central de Ferramentas', "Modo Performance ativado para $rodando", [System.Windows.Forms.ToolTipIcon]::Info)
     } elseif (-not $rodando -and $script:ModoJogoAtivo) {
         $script:ModoJogoAtivo = $false
         Log "Jogo encerrado: $($script:JogoAtual)" Magenta
@@ -2320,7 +2320,7 @@ ul{background:#fff;border:1px solid #d5deea;margin:0;padding:12px 12px 12px 32px
     }
 
     [void]$sb.AppendLine('<div class="assin"><div>Técnico responsável<br><b>' + (HtmlEnc $D.Tecnico) + '</b></div><div>Cliente<br><b>' + (HtmlEnc $D.Cliente) + '</b></div></div>')
-    [void]$sb.AppendLine('<div class="rod">Gerado pelo Otimizador Gamer ' + (HtmlEnc $D.Versao) + '</div></div></body></html>')
+    [void]$sb.AppendLine('<div class="rod">Gerado pela HS-Tech Central de Ferramentas ' + (HtmlEnc $D.Versao) + '</div></div></body></html>')
     return $sb.ToString()
 }
 
@@ -2330,7 +2330,7 @@ function Gerar-RelatorioHTML {
     $d.Data = Get-Date -Format 'dd/MM/yyyy HH:mm'
     $d.Computador = $env:COMPUTERNAME
     $d.Usuario = $env:USERNAME
-    $d.Versao = 'v3.3'
+    $d.Versao = 'v3.6.0'
     $d.Empresa = [string]$script:Atendimento.Empresa
     $d.Tecnico = [string]$script:Atendimento.Tecnico
     $d.ContatoEmpresa = [string]$script:Atendimento.ContatoEmpresa
@@ -3286,7 +3286,7 @@ function Finalizar-Remover {
         } catch { }
         if (-not $abriu) { try { Start-Process notepad.exe -ArgumentList "`"$destinoRel`"" } catch { } }
     }
-    [void][System.Windows.Forms.MessageBox]::Show("Tudo pronto.`n`nO relatório final foi salvo na Área de Trabalho. O programa será fechado e removido deste PC em instantes.", 'Otimizador Gamer', 'OK', 'Information')
+    [void][System.Windows.Forms.MessageBox]::Show("Tudo pronto.`n`nO relatório final foi salvo na Área de Trabalho. O programa será fechado e removido deste PC em instantes.", 'HS-Tech | Central de Ferramentas', 'OK', 'Information')
     # So agora inicia a remocao: o processo separado espera esta janela fechar antes de apagar
     Start-Process -FilePath 'cmd.exe' -ArgumentList ('/c ' + ($cmds -join ' & ')) -WindowStyle Hidden
     $script:EncerrarAposAcao = $true
@@ -3605,7 +3605,7 @@ $script:FonteNav = (Fonte 'Segoe UI' 10 'Regular')
 $script:FonteNavAtiva = (Fonte 'Segoe UI Semibold' 10 'Regular')
 
 $script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Text = 'Otimizador Gamer'
+$script:Form.Text = 'HS-Tech | Central de Ferramentas'
 $script:Form.Icon = [System.Drawing.SystemIcons]::Shield
 $areaUtil = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $larguraJanela = [int][math]::Min(1420, $areaUtil.Width - 24)
@@ -3726,7 +3726,7 @@ $marca.BackColor = (ParaCor $script:Paleta.Neon)
 $script:Cabecalho.Controls.Add($marca)
 
 $lblT1 = New-Object System.Windows.Forms.Label
-$lblT1.Text = 'OTIMIZADOR'
+$lblT1.Text = 'HS-TECH'
 $lblT1.AutoSize = $true
 $lblT1.Font = (Fonte 'Segoe UI Black' 17 'Regular')
 $lblT1.ForeColor = (ParaCor $script:Paleta.Texto)
@@ -3734,7 +3734,7 @@ $lblT1.Location = New-Object System.Drawing.Point(42, 10)
 $script:Cabecalho.Controls.Add($lblT1)
 
 $lblT2 = New-Object System.Windows.Forms.Label
-$lblT2.Text = 'GAMER'
+$lblT2.Text = 'CENTRAL'
 $lblT2.AutoSize = $true
 $lblT2.Font = (Fonte 'Segoe UI Black' 17 'Regular')
 $lblT2.ForeColor = (ParaCor $script:Paleta.Neon)
@@ -3742,7 +3742,7 @@ $lblT2.Location = New-Object System.Drawing.Point((42 + $lblT1.PreferredWidth + 
 $script:Cabecalho.Controls.Add($lblT2)
 
 $lblSub = New-Object System.Windows.Forms.Label
-$lblSub.Text = 'Central de desempenho, diagnóstico e manutenção do Windows'
+$lblSub.Text = 'Desempenho • diagnóstico • manutenção inteligente do Windows'
 $lblSub.AutoSize = $true
 $lblSub.Font = (Fonte 'Segoe UI' 9 'Regular')
 $lblSub.ForeColor = (ParaCor $script:Paleta.Mudo)
@@ -3758,7 +3758,7 @@ $script:ChipAdmin.Location = New-Object System.Drawing.Point(700, 20)
 $script:Cabecalho.Controls.Add($script:ChipAdmin)
 
 $script:ChipVer = New-Object System.Windows.Forms.Label
-$script:ChipVer.Text = 'Versão 3.3'
+$script:ChipVer.Text = 'Versão 3.6.0'
 $script:ChipVer.AutoSize = $true
 $script:ChipVer.Font = (Fonte 'Segoe UI' 8.5 'Regular')
 $script:ChipVer.ForeColor = (ParaCor $script:Paleta.Mudo)
@@ -3829,7 +3829,7 @@ $script:NavInd.Visible = $false
 $lateral.Controls.Add($script:NavInd)
 
 $lblVersao = New-Object System.Windows.Forms.Label
-$lblVersao.Text = 'HS-Tech  |  Otimizador Gamer v3.4'
+$lblVersao.Text = 'HS-TECH  |  Central de Ferramentas v3.6.0'
 $lblVersao.AutoSize = $false
 $lblVersao.Dock = 'Bottom'
 $lblVersao.Height = 32
@@ -4157,7 +4157,7 @@ Nova-Secao $pgMon 'FERRAMENTAS'
 $pgMon.Controls.Add((Novo-Botao "Monitorar no console`n10 leituras de CPU, RAM e GPU" { Monitorar-Console }))
 $pgMon.Controls.Add((Novo-Botao "Exportar histórico (CSV)`nResumo da sessão e arquivo para planilha" { Exportar-Historico } $script:Paleta.Neon))
 $pgMon.Controls.Add((Novo-Botao "Testar notificação`nMostra um aviso de teste na bandeja" {
-    $script:Tray.ShowBalloonTip(4000, 'Otimizador Gamer', 'Notificação de teste: os alertas estão funcionando.', [System.Windows.Forms.ToolTipIcon]::Info)
+    $script:Tray.ShowBalloonTip(4000, 'HS-Tech | Central de Ferramentas', 'Notificação de teste: os alertas estão funcionando.', [System.Windows.Forms.ToolTipIcon]::Info)
     Log 'Notificação de teste enviada.' Green
 } $script:Paleta.Cian))
 
@@ -4245,7 +4245,7 @@ $script:Tray.Add_DoubleClick({ $script:Form.Show(); $script:Form.WindowState = '
 $script:Form.Add_Resize({
     if ($script:Form.WindowState -eq 'Minimized') {
         $script:Form.Hide()
-        $script:Tray.ShowBalloonTip(2500, 'Otimizador Gamer', 'Continua rodando na bandeja (detecção de jogos e alertas).', [System.Windows.Forms.ToolTipIcon]::Info)
+        $script:Tray.ShowBalloonTip(2500, 'HS-Tech | Central de Ferramentas', 'Continua rodando na bandeja (detecção de jogos e alertas).', [System.Windows.Forms.ToolTipIcon]::Info)
     } else {
         Ajustar-Larguras
     }
