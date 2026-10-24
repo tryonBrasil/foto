@@ -34,7 +34,7 @@ jobs:
       - name: Verificar protecoes de limpeza e restauracao
         shell: powershell
         run: |
-          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'OtimizadorGamer.ps1') -Raw
+          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1') -Raw
           $verificacoes = @(
             @{ Nome = 'Confirma limpeza'; Regex = 'Confirmar\s+"A limpeza remove arquivos temporarios' },
             @{ Nome = 'Preserva Lixeira'; Regex = 'A Lixeira e preservada intencionalmente' },
