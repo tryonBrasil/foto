@@ -765,7 +765,7 @@ function Criar-ParticaoBackup {
     $bloco=$null
     foreach($iv in $analiseDepois.Intervalos){if($null -eq $bloco -or $iv.Tamanho -gt $bloco.Tamanho){$bloco=$iv}}
     if(!$bloco -or $bloco.Tamanho -lt 1GB){[void][Windows.Forms.MessageBox]::Show('O volume foi reduzido, mas o Windows não apresentou um bloco contíguo suficiente para criar a nova partição. Nenhum volume existente foi formatado. Abra Gerenciamento de Disco para avaliar o espaço liberado.','HS-Tech - Espaço liberado','OK','Warning');return}
-    $novo=New-Partition -DiskNumber $partAtual.DiskNumber -UseMaximumSize -AssignDriveLetter -ErrorAction Stop
+    $novo=New-Partition -DiskNumber $partAtual.DiskNumber -Size $bytes -AssignDriveLetter -ErrorAction Stop
     $fmt=Format-Volume -Partition $novo -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
     $script:BackupDestino=$fmt.DriveLetter+':\'
     $script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino
