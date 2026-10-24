@@ -8,7 +8,7 @@
 # ============================================================
 param([switch]$Manutencao)
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 $ErrorActionPreference = 'Continue'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -283,8 +283,7 @@ function Limpar-Temporarios {
     Log '--- Limpeza de temporarios ---' Cyan
     $alvos = @(
         $env:TEMP, "$env:SystemRoot\Temp",
-        "$env:LOCALAPPDATA\D3DSCache", "$env:LOCALAPPDATA\NVIDIA\DXCache",
-        "$env:LOCALAPPDATA\NVIDIA\GLCache", "$env:LOCALAPPDATA\AMD\DxCache"
+        # A Lixeira e preservada intencionalmente; caches de shaders tambem sao mantidos.
     )
     $letra = $env:SystemDrive.TrimEnd(':')
     $livreAntes = (Get-PSDrive -Name $letra).Free
@@ -295,7 +294,7 @@ function Limpar-Temporarios {
             Log "Limpo: $a"
         }
     }
-    try { Clear-RecycleBin -Force -ErrorAction Stop; Log 'Lixeira esvaziada.' } catch { }
+    # A Lixeira e preservada intencionalmente para evitar perda acidental de arquivos do cliente.
     $livreDepois = (Get-PSDrive -Name $letra).Free
     $liberado = [math]::Round(($livreDepois - $livreAntes) / 1MB)
     Log "Espaco liberado: aproximadamente $liberado MB" Green
