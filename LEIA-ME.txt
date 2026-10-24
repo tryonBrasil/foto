@@ -4,8 +4,7 @@
 CONTEÚDO DO PACOTE
   HS-Tech.exe                       Programa (executável único)
   Exemplo_Relatorio.html            Exemplo do relatório para o cliente (dados fictícios)
-  codigo-fonte\OtimizadorGamer.ps1  Script completo, editável
-  codigo-fonte\Launcher.cs          Código do inicializador do executável
+  Código-fonte completo disponível no repositório GitHub (pasta codigo-fonte).
 
 COMO USAR
   1. Dê dois cliques em HS-Tech.exe e aceite o pedido de administrador.
@@ -63,7 +62,7 @@ AVISOS IMPORTANTES
 
 COMO RECOMPILAR
   A compilação oficial é feita pelo GitHub Actions ao atualizar o script
-  codigo-fonte\\OtimizadorGamer.ps1. Abra a aba Actions do repositório e baixe
+  codigo-fonte\OtimizadorGamer.ps1. Abra a aba Actions do repositório e baixe
   o artefato HS-Tech-Portatil-EXE-Unico da execução concluída. O artefato
   contém HS-Tech.exe e os arquivos de apoio; os artefatos expiram após 14 dias.
 
