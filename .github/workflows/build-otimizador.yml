@@ -31,7 +31,7 @@ jobs:
           Remove-Item $staging, $zip -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
           Get-ChildItem -LiteralPath $origem -Recurse -File | ForEach-Object {
-            if ($_.Name -in @('Activator.cmd','removeedge.bat')) {
+            if ($_.Name -in @('Activator.cmd','removeedge.bat','Windows Update Pause Activate.reg')) {
               Write-Host ("Ignorado por segurança: " + $_.FullName)
               return
             }
