@@ -533,6 +533,101 @@ function Exportar-RelatorioSistema {
 # ============================================================
 #  LIMPEZA E DESEMPENHO
 # ============================================================
+function Gerenciar-MemoriaProcessos {
+    # O Windows administra a RAM automaticamente; a opcao segura e revisar aplicativos e fechar apenas os escolhidos pelo usuario.
+    Log '--- Analise de memoria e processos ---' Cyan
+    try {
+        $todos = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | Sort-Object -Property WorkingSet64 -Descending)
+        $protegidos = @('System','Idle','Registry','smss','csrss','wininit','services','lsass','svchost','winlogon','dwm','fontdrvhost','spoolsv','MsMpEng','SecurityHealthService','SearchIndexer','Memory Compression','audiodg','WmiPrvSE','conhost','powershell','pwsh','OtimizadorGamer')
+        $formMem = New-Object System.Windows.Forms.Form
+        $formMem.Text = 'HS-Tech - Memoria e processos'
+        $formMem.Size = New-Object System.Drawing.Size(760, 540)
+        $formMem.StartPosition = 'CenterParent'
+        $formMem.BackColor = (ParaCor $script:Paleta.Fundo)
+        $formMem.ForeColor = (ParaCor $script:Paleta.Texto)
+        $formMem.Font = (Fonte 'Segoe UI' 9 'Regular')
+        $dica = New-Object System.Windows.Forms.Label
+        $dica.Text = 'Selecione somente aplicativos que voce reconhece e nao esta usando. Processos essenciais sao protegidos. Fechar um aplicativo pode perder trabalho nao salvo.'
+        $dica.Location = New-Object System.Drawing.Point(16, 14)
+        $dica.Size = New-Object System.Drawing.Size(710, 42)
+        $dica.ForeColor = (ParaCor $script:Paleta.Mudo)
+        $formMem.Controls.Add($dica)
+        $lista = New-Object System.Windows.Forms.ListView
+        $lista.Location = New-Object System.Drawing.Point(16, 62)
+        $lista.Size = New-Object System.Drawing.Size(710, 360)
+        $lista.View = 'Details'
+        $lista.CheckBoxes = $true
+        $lista.FullRowSelect = $true
+        $lista.GridLines = $true
+        $lista.BackColor = (ParaCor $script:Paleta.Painel)
+        $lista.ForeColor = (ParaCor $script:Paleta.Texto)
+        [void]$lista.Columns.Add('Processo', 210)
+        [void]$lista.Columns.Add('PID', 80)
+        [void]$lista.Columns.Add('Memoria RAM', 120)
+        [void]$lista.Columns.Add('Estado', 260)
+        foreach ($p in ($todos | Select-Object -First 100)) {
+            $mb = [math]::Round($p.WorkingSet64 / 1MB, 1)
+            $seguro = ($protegidos -notcontains $p.ProcessName)
+            $item = New-Object System.Windows.Forms.ListViewItem([string]$p.ProcessName)
+            [void]$item.SubItems.Add([string]$p.Id)
+            [void]$item.SubItems.Add("$mb MB")
+            if ($seguro) {
+                [void]$item.SubItems.Add('Aplicativo/processo - revisar antes de fechar')
+                $item.Tag = [pscustomobject]@{ Id = $p.Id; Nome = $p.ProcessName; Seguro = $true }
+            } else {
+                [void]$item.SubItems.Add('PROTEGIDO - nao pode ser encerrado por aqui')
+                $item.ForeColor = (ParaCor $script:Paleta.Amarelo)
+                $item.Tag = [pscustomobject]@{ Id = $p.Id; Nome = $p.ProcessName; Seguro = $false }
+            }
+            [void]$lista.Items.Add($item)
+        }
+        $formMem.Controls.Add($lista)
+        $btnAtualizar = Novo-BotaoPequeno 'ATUALIZAR LISTA' {
+            $formMem.Close()
+            Gerenciar-MemoriaProcessos
+        } $script:Paleta.Cian 160 36
+        $btnAtualizar.Location = New-Object System.Drawing.Point(16, 438)
+        $formMem.Controls.Add($btnAtualizar)
+        $btnFechar = Novo-BotaoPequeno 'ENCERRAR SELECIONADOS' {
+            $selecionados = @($lista.CheckedItems | ForEach-Object { $_.Tag } | Where-Object { $_ -and $_.Seguro })
+            if ($selecionados.Count -eq 0) {
+                [void][System.Windows.Forms.MessageBox]::Show('Marque um ou mais processos nao protegidos que voce reconhece e deseja fechar.', 'HS-Tech', 'OK', 'Information')
+                return
+            }
+            $nomes = ($selecionados | ForEach-Object { "$($_.Nome) (PID $($_.Id))" }) -join [Environment]::NewLine
+            $pergunta = "Fechar os processos selecionados? Salve seu trabalho antes." + [Environment]::NewLine + [Environment]::NewLine + $nomes
+            $res = [System.Windows.Forms.MessageBox]::Show($pergunta, 'Confirmar encerramento', 'YesNo', 'Warning')
+            if ($res -ne 'Yes') { return }
+            foreach ($itemProc in $selecionados) {
+                try {
+                    $proc = Get-Process -Id ([int]$itemProc.Id) -ErrorAction Stop
+                    if ($proc.ProcessName -ne $itemProc.Nome -or $protegidos -contains $proc.ProcessName) {
+                        Log "Processo $($itemProc.Nome) ignorado por verificacao de seguranca." Yellow
+                        continue
+                    }
+                    Stop-Process -Id $proc.Id -ErrorAction Stop
+                    Log "Processo encerrado por solicitacao do usuario: $($proc.ProcessName) (PID $($proc.Id))." Green
+                } catch {
+                    Log "Nao foi possivel encerrar $($itemProc.Nome) (PID $($itemProc.Id)): $($_.Exception.Message)" Yellow
+                }
+            }
+            $formMem.Close()
+            [void][System.Windows.Forms.MessageBox]::Show('Acao concluida. O Windows continuara gerenciando a memoria automaticamente.', 'HS-Tech', 'OK', 'Information')
+        } $script:Paleta.Rosa 210 36
+        $btnFechar.Location = New-Object System.Drawing.Point(516, 438)
+        $formMem.Controls.Add($btnFechar)
+        [void]$formMem.ShowDialog($script:Form)
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+        if ($os -and $os.TotalVisibleMemorySize -gt 0) {
+            $usada = [math]::Round(100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize, 1)
+            Log "Uso de RAM apos a analise: $usada%." Cyan
+        }
+    } catch {
+        Log "Falha ao analisar memoria/processos: $($_.Exception.Message)" Red
+        [void][System.Windows.Forms.MessageBox]::Show("Nao foi possivel abrir a analise de processos." + [Environment]::NewLine + $_.Exception.Message, 'HS-Tech', 'OK', 'Error')
+    }
+}
+
 function Limpar-Temporarios {
     param([switch]$SemConfirmar)
     Log '--- Limpeza de temporarios ---' Cyan
@@ -3633,6 +3728,7 @@ $pgInicio.Controls.Add((Novo-Botao "Desfazer ajustes`nVolta registro, plano de e
 # ============================================================
 $pgDes = Nova-Pagina 'desempenho' 'Desempenho' 'Limpeza, energia, Modo Jogo e ajustes do sistema para ganhar FPS e estabilidade.'
 Nova-Secao $pgDes 'LIMPEZA E ENERGIA'
+$pgDes.Controls.Add((Novo-Botao "Analisar memoria e processos`nVeja os maiores consumidores de RAM e feche apenas os selecionados" { Gerenciar-MemoriaProcessos } $script:Paleta.Cian))
 $pgDes.Controls.Add((Novo-Botao "Limpar temporários`nPreserva o cache de shaders e a Lixeira" { Limpar-Temporarios }))
 $pgDes.Controls.Add((Novo-Botao "Limpar cache dos navegadores`nChrome, Edge, Brave e Firefox (senhas preservadas)" { Limpar-Navegadores }))
 $pgDes.Controls.Add((Novo-Botao "Plano Alto desempenho`nAtiva o plano de energia de alto desempenho" { Ajustar-Energia }))
