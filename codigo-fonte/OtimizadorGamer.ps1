@@ -533,6 +533,3658 @@ function Exportar-RelatorioSistema {
 # ============================================================
 #  LIMPEZA E DESEMPENHO
 # ============================================================
+function Caminho-BibliotecaProgramas {
+    $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:USERPROFILE }
+    $dir = Join-Path $base 'HS-Tech'
+    if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+    return (Join-Path $dir 'programas.json')
+}
+function Ler-BibliotecaProgramas {
+    $f = Caminho-BibliotecaProgramas
+    if (Test-Path -LiteralPath $f) {
+        try { return @((Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json)) } catch { Log 'A lista de programas nao pode ser lida; ela sera recriada ao salvar.' Yellow }
+    }
+    return @()
+}
+function Salvar-BibliotecaProgramas {
+    try { ConvertTo-Json -InputObject @($script:BibliotecaProgramas) -Depth 4 | Set-Content -LiteralPath (Caminho-BibliotecaProgramas) -Encoding UTF8 }
+    catch { Log "Nao foi possivel salvar a biblioteca: $($_.Exception.Message)" Red }
+}
+function Atualizar-ListaProgramas {
+    if (-not $script:ListaProgramasUI) { return }
+    $script:ListaProgramasUI.BeginUpdate()
+    $script:ListaProgramasUI.Items.Clear()
+    $busca = ''
+    if ($script:BuscaProgramasUI) { $busca = $script:BuscaProgramasUI.Text.Trim() }
+    foreach ($p in @($script:BibliotecaProgramas)) {
+        if (-not $p.Caminho -or -not (Test-Path -LiteralPath ([string]$p.Caminho))) { continue }
+        if ($busca -and ([string]$p.Nome -notlike "*$busca*" -and [string]$p.Caminho -notlike "*$busca*")) { continue }
+        $tipo = if ([string]$p.Caminho -match '\.lnk
+    # O Windows administra a RAM automaticamente; a opcao segura e revisar aplicativos e fechar apenas os escolhidos pelo usuario.
+    Log '--- Analise de memoria e processos ---' Cyan
+    try {
+        $todos = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | Sort-Object -Property WorkingSet64 -Descending)
+        $protegidos = @('System','Idle','Registry','smss','csrss','wininit','services','lsass','svchost','winlogon','dwm','fontdrvhost','spoolsv','MsMpEng','SecurityHealthService','SearchIndexer','Memory Compression','audiodg','WmiPrvSE','conhost','powershell','pwsh','OtimizadorGamer')
+        $formMem = New-Object System.Windows.Forms.Form
+        $formMem.Text = 'HS-Tech - Memoria e processos'
+        $formMem.Size = New-Object System.Drawing.Size(760, 540)
+        $formMem.StartPosition = 'CenterParent'
+        $formMem.BackColor = (ParaCor $script:Paleta.Fundo)
+        $formMem.ForeColor = (ParaCor $script:Paleta.Texto)
+        $formMem.Font = (Fonte 'Segoe UI' 9 'Regular')
+        $dica = New-Object System.Windows.Forms.Label
+        $dica.Text = 'Selecione somente aplicativos que voce reconhece e nao esta usando. Processos essenciais sao protegidos. Fechar um aplicativo pode perder trabalho nao salvo.'
+        $dica.Location = New-Object System.Drawing.Point(16, 14)
+        $dica.Size = New-Object System.Drawing.Size(710, 42)
+        $dica.ForeColor = (ParaCor $script:Paleta.Mudo)
+        $formMem.Controls.Add($dica)
+        $lista = New-Object System.Windows.Forms.ListView
+        $lista.Location = New-Object System.Drawing.Point(16, 62)
+        $lista.Size = New-Object System.Drawing.Size(710, 360)
+        $lista.View = 'Details'
+        $lista.CheckBoxes = $true
+        $lista.FullRowSelect = $true
+        $lista.GridLines = $true
+        $lista.BackColor = (ParaCor $script:Paleta.Painel)
+        $lista.ForeColor = (ParaCor $script:Paleta.Texto)
+        [void]$lista.Columns.Add('Processo', 210)
+        [void]$lista.Columns.Add('PID', 80)
+        [void]$lista.Columns.Add('Memoria RAM', 120)
+        [void]$lista.Columns.Add('Estado', 260)
+        foreach ($p in ($todos | Select-Object -First 100)) {
+            $mb = [math]::Round($p.WorkingSet64 / 1MB, 1)
+            $seguro = ($protegidos -notcontains $p.ProcessName)
+            $item = New-Object System.Windows.Forms.ListViewItem([string]$p.ProcessName)
+            [void]$item.SubItems.Add([string]$p.Id)
+            [void]$item.SubItems.Add("$mb MB")
+            if ($seguro) {
+                [void]$item.SubItems.Add('Aplicativo/processo - revisar antes de fechar')
+                $item.Tag = [pscustomobject]@{ Id = $p.Id; Nome = $p.ProcessName; Seguro = $true }
+            } else {
+                [void]$item.SubItems.Add('PROTEGIDO - nao pode ser encerrado por aqui')
+                $item.ForeColor = (ParaCor $script:Paleta.Amarelo)
+                $item.Tag = [pscustomobject]@{ Id = $p.Id; Nome = $p.ProcessName; Seguro = $false }
+            }
+            [void]$lista.Items.Add($item)
+        }
+        $formMem.Controls.Add($lista)
+        $btnAtualizar = Novo-BotaoPequeno 'ATUALIZAR LISTA' {
+            $formMem.Close()
+            Gerenciar-MemoriaProcessos
+        } $script:Paleta.Cian 160 36
+        $btnAtualizar.Location = New-Object System.Drawing.Point(16, 438)
+        $formMem.Controls.Add($btnAtualizar)
+        $btnFechar = Novo-BotaoPequeno 'ENCERRAR SELECIONADOS' {
+            $selecionados = @($lista.CheckedItems | ForEach-Object { $_.Tag } | Where-Object { $_ -and $_.Seguro })
+            if ($selecionados.Count -eq 0) {
+                [void][System.Windows.Forms.MessageBox]::Show('Marque um ou mais processos nao protegidos que voce reconhece e deseja fechar.', 'HS-Tech', 'OK', 'Information')
+                return
+            }
+            $nomes = ($selecionados | ForEach-Object { "$($_.Nome) (PID $($_.Id))" }) -join [Environment]::NewLine
+            $pergunta = "Fechar os processos selecionados? Salve seu trabalho antes." + [Environment]::NewLine + [Environment]::NewLine + $nomes
+            $res = [System.Windows.Forms.MessageBox]::Show($pergunta, 'Confirmar encerramento', 'YesNo', 'Warning')
+            if ($res -ne 'Yes') { return }
+            foreach ($itemProc in $selecionados) {
+                try {
+                    $proc = Get-Process -Id ([int]$itemProc.Id) -ErrorAction Stop
+                    if ($proc.ProcessName -ne $itemProc.Nome -or $protegidos -contains $proc.ProcessName) {
+                        Log "Processo $($itemProc.Nome) ignorado por verificacao de seguranca." Yellow
+                        continue
+                    }
+                    Stop-Process -Id $proc.Id -ErrorAction Stop
+                    Log "Processo encerrado por solicitacao do usuario: $($proc.ProcessName) (PID $($proc.Id))." Green
+                } catch {
+                    Log "Nao foi possivel encerrar $($itemProc.Nome) (PID $($itemProc.Id)): $($_.Exception.Message)" Yellow
+                }
+            }
+            $formMem.Close()
+            [void][System.Windows.Forms.MessageBox]::Show('Acao concluida. O Windows continuara gerenciando a memoria automaticamente.', 'HS-Tech', 'OK', 'Information')
+        } $script:Paleta.Rosa 210 36
+        $btnFechar.Location = New-Object System.Drawing.Point(516, 438)
+        $formMem.Controls.Add($btnFechar)
+        [void]$formMem.ShowDialog($script:Form)
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+        if ($os -and $os.TotalVisibleMemorySize -gt 0) {
+            $usada = [math]::Round(100 * ($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize, 1)
+            Log "Uso de RAM apos a analise: $usada%." Cyan
+        }
+    } catch {
+        Log "Falha ao analisar memoria/processos: $($_.Exception.Message)" Red
+        [void][System.Windows.Forms.MessageBox]::Show("Nao foi possivel abrir a analise de processos." + [Environment]::NewLine + $_.Exception.Message, 'HS-Tech', 'OK', 'Error')
+    }
+}
+
+function Limpar-Temporarios {
+    param([switch]$SemConfirmar)
+    Log '--- Limpeza de temporarios ---' Cyan
+    if (-not $SemConfirmar -and -not (Confirmar "A limpeza remove arquivos temporarios que podem estar em uso. Os caches de shaders e a Lixeira serao preservados para evitar recompilacao e perda de arquivos. Continuar?")) {
+        Log 'Limpeza cancelada pelo usuario.' Yellow
+        return
+    }
+    # Nao apagar caches de shaders: o Windows/jogos podem precisar recompila-los,
+    # causando travamentos temporarios depois da limpeza.
+    $alvos = @(
+        $env:TEMP, "$env:SystemRoot\Temp"
+    )
+    $letra = $env:SystemDrive.TrimEnd(':')
+    $livreAntes = (Get-PSDrive -Name $letra).Free
+    foreach ($a in $alvos) {
+        if (Test-Path $a) {
+            Get-ChildItem -Path $a -Force -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Log "Limpo: $a"
+        }
+    }
+    # A Lixeira e preservada intencionalmente; esvazia-la pode causar perda de dados.
+    $livreDepois = (Get-PSDrive -Name $letra).Free
+    $liberado = [math]::Round(($livreDepois - $livreAntes) / 1MB)
+    Log "Espaco liberado: aproximadamente $liberado MB" Green
+}
+
+function Ajustar-Energia {
+    Log '--- Plano de energia ---' Cyan
+    $atual = Plano-Atual
+    if ($atual) { Salvar-Backup -Chave 'PlanoEnergia' -Valor $atual }
+    $altoDesempenho = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+    powercfg /setactive $altoDesempenho 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $novo = powercfg -duplicatescheme $altoDesempenho 2>$null
+        if ($novo -match '([0-9a-fA-F\-]{36})') { powercfg /setactive $Matches[1] }
+    }
+    $planoFinal = Plano-Atual
+    if ($planoFinal -eq $altoDesempenho) {
+        Log 'Plano Alto desempenho ativado e confirmado.' Green
+    } else {
+        Log 'O Windows nao confirmou a ativacao do plano Alto desempenho. Mantendo o plano atual.' Yellow
+    }
+}
+
+function Ativar-DesempenhoMaximo {
+    Log '--- Plano Desempenho máximo ---' Cyan
+    if (Tem-Bateria) {
+        if (-not (Confirmar "O plano Desempenho máximo mantém o processador no limite o tempo todo: aumenta o consumo e o calor e reduz a duração da bateria em notebook.`n`nÉ indicado para PC de mesa ou notebook ligado na tomada. Continuar?")) {
+            Log 'Cancelado.' Yellow
+            return
+        }
+    }
+    $atual = Plano-Atual
+    if ($atual) { Salvar-Backup -Chave 'PlanoEnergia' -Valor $atual }
+    $guidModelo = 'e9a42b02-d5df-448d-aa00-03f14749eb61'
+    $padraoGuid = '([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
+    $alvo = $null
+
+    # 1) o plano oculto ja foi criado antes neste PC?
+    $lista = (powercfg /list | Out-String)
+    foreach ($linha in ($lista -split "`r?`n")) {
+        if ($linha -match $padraoGuid) {
+            $g = $Matches[1]
+            if (($g -ieq $guidModelo) -or ($linha -match 'Ultimate|Desempenho\s+m')) { $alvo = $g; break }
+        }
+    }
+    # 2) senao, cria a partir do modelo do Windows
+    if (-not $alvo) {
+        $saida = (powercfg -duplicatescheme $guidModelo 2>&1 | Out-String)
+        if ($saida -match $padraoGuid) { $alvo = $Matches[1] }
+    }
+    # 3) ativa e confirma
+    if ($alvo) {
+        powercfg /setactive $alvo 2>&1 | Out-Null
+        $agora = Plano-Atual
+        if ($agora -and ($agora -ieq $alvo)) {
+            Log ("Plano Desempenho máximo ativado ({0})." -f (Nome-PlanoEnergia)) Green
+            Adicionar-Achado 'Energia' 'Plano de energia Desempenho máximo ativado.' 'ok'
+            return
+        }
+    }
+    Log 'O plano Desempenho máximo não está disponível neste PC (comum em notebooks e em sistemas com modo de espera moderno). Será usado o Alto desempenho.' Yellow
+    Adicionar-Achado 'Energia' 'Desempenho máximo indisponível neste PC; foi usado o plano Alto desempenho.' 'aviso'
+    Ajustar-Energia
+}
+
+function Ajustar-ModoJogo {
+    Log '--- Modo Jogo do Windows ---' Cyan
+    Definir-Reg 'HKCU:\Software\Microsoft\GameBar' 'AllowAutoGameMode' 1
+    Definir-Reg 'HKCU:\Software\Microsoft\GameBar' 'AutoGameModeEnabled' 1
+    Definir-Reg 'HKCU:\System\GameConfigStore' 'GameDVR_Enabled' 0
+    Definir-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' 'AppCaptureEnabled' 0
+    Log 'Modo Jogo ativo e captura em segundo plano desativada.' Green
+}
+
+function Entrar-ModoPerformance {
+    Log '--- Modo Performance: ON ---' Cyan
+    if (-not $script:PlanoAnterior) { $script:PlanoAnterior = Plano-Atual }
+    foreach ($p in $script:ProcessosFechar) {
+        $procs = Get-Process -Name $p -ErrorAction SilentlyContinue
+        if ($procs) {
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            Log "Fechado: $p"
+        }
+    }
+    Ajustar-Energia
+    Silenciar-Notificacoes
+    Log 'Modo Performance ativo.' Green
+}
+
+function Sair-ModoPerformance {
+    Log '--- Modo Performance: OFF ---' Cyan
+    $alvo = $script:PlanoAnterior
+    if (-not $alvo) { $alvo = Ler-Backup 'PlanoEnergia' }
+    if ($alvo) {
+        powercfg /setactive $alvo 2>$null
+        Log 'Plano de energia anterior restaurado.' Green
+    } else {
+        Log 'Nao ha plano anterior salvo.' Yellow
+    }
+    Restaurar-Notificacoes
+    $script:PlanoAnterior = $null
+}
+
+function Listar-Inicializacao {
+    Log '--- Apps que iniciam com o Windows ---' Cyan
+    $itens = @(Get-CimInstance Win32_StartupCommand)
+    foreach ($i in $itens) { Log ("{0}  ({1})" -f $i.Name, $i.Location) }
+    Log "Total: $($itens.Count). Desative os desnecessarios em Gerenciador de Tarefas > Inicializar." Yellow
+}
+
+function Liberar-RAM {
+    Log '--- Liberar RAM em espera ---' Cyan
+    if (-not ('MemTool' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class MemTool {
+    [DllImport("ntdll.dll")] static extern int NtSetSystemInformation(int cls, IntPtr info, int len);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool LookupPrivilegeValue(string sys, string name, out long luid);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(IntPtr token, bool disable, ref TOKEN_PRIVILEGES np, int len, IntPtr prev, IntPtr ret);
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    struct TOKEN_PRIVILEGES { public int Count; public long Luid; public int Attr; }
+    public static int PurgeStandby() {
+        IntPtr token;
+        OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x28, out token);
+        TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+        tp.Count = 1; tp.Attr = 2;
+        LookupPrivilegeValue(null, "SeProfileSingleProcessPrivilege", out tp.Luid);
+        AdjustTokenPrivileges(token, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+        IntPtr p = Marshal.AllocHGlobal(4);
+        Marshal.WriteInt32(p, 4);
+        int r = NtSetSystemInformation(80, p, 4);
+        Marshal.FreeHGlobal(p);
+        return r;
+    }
+}
+'@
+    }
+    $antes = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+    $r = [MemTool]::PurgeStandby()
+    Start-Sleep -Milliseconds 500
+    $depois = [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB)
+    if ($r -eq 0) {
+        Log "RAM livre: $antes MB -> $depois MB" Green
+    } else {
+        Log "O Windows recusou a operacao (codigo $r)." Yellow
+    }
+}
+
+function Ajustar-GPUSistema {
+    Log '--- Ajustes de GPU e efeitos visuais ---' Cyan
+    if (-not (Confirmar "Isto ativa o agendamento de GPU acelerado por hardware (HAGS), reduz efeitos visuais e desativa transparencias.`n`nPrecisa reiniciar o PC. Pode ser desfeito em DESFAZER. Continuar?")) {
+        Log 'Cancelado.' Yellow; return
+    }
+    Definir-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' 'HwSchMode' 2
+    Definir-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' 'VisualFXSetting' 2
+    Definir-Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'EnableTransparency' 0
+    Log 'Ajustes aplicados. Reinicie o PC. (HAGS so funciona em GPUs/drivers compativeis.)' Green
+}
+
+function Definir-HorarioAtivo {
+    Log '--- Horario ativo do Windows Update ---' Cyan
+    if (-not (Confirmar "Define o horario ativo das 08:00 as 02:00, evitando reinicios do Windows Update enquanto voce joga. Continuar?")) {
+        Log 'Cancelado.' Yellow; return
+    }
+    Definir-Reg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'ActiveHoursStart' 8
+    Definir-Reg 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' 'ActiveHoursEnd' 2
+    Log 'Horario ativo definido: 08:00 - 02:00.' Green
+}
+
+function Remover-Bloatware {
+    Log '--- Remocao de bloatware ---' Cyan
+    $lista = @('Microsoft.BingNews','Microsoft.BingWeather','Microsoft.GetHelp','Microsoft.Getstarted',
+               'Microsoft.MicrosoftSolitaireCollection','Microsoft.MicrosoftOfficeHub','Microsoft.People',
+               'Microsoft.WindowsFeedbackHub','Microsoft.YourPhone','Microsoft.ZuneMusic','Microsoft.ZuneVideo',
+               'Clipchamp.Clipchamp','MicrosoftTeams','Microsoft.Todos','Microsoft.PowerAutomateDesktop')
+    $instalados = @(Get-AppxPackage | Where-Object { $lista -contains $_.Name })
+    if ($instalados.Count -eq 0) { Log 'Nenhum app da lista esta instalado.' Green; return }
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = 'Remover apps'
+    $dlg.Size = New-Object System.Drawing.Size(460, 470)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.BackColor = (ParaCor $script:Paleta.Fundo)
+    $dlg.ForeColor = (ParaCor $script:Paleta.Texto)
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+
+    $aviso = New-Object System.Windows.Forms.Label
+    $aviso.Text = "Marque os apps que deseja remover.`nPara reinstalar depois, use a Microsoft Store."
+    $aviso.AutoSize = $true
+    $aviso.Location = New-Object System.Drawing.Point(14, 12)
+    $dlg.Controls.Add($aviso)
+
+    $lb = New-Object System.Windows.Forms.CheckedListBox
+    $lb.Location = New-Object System.Drawing.Point(14, 56)
+    $lb.Size = New-Object System.Drawing.Size(414, 310)
+    $lb.CheckOnClick = $true
+    $lb.BackColor = (ParaCor $script:Paleta.Painel)
+    $lb.ForeColor = (ParaCor $script:Paleta.Texto)
+    $lb.BorderStyle = 'FixedSingle'
+    foreach ($i in $instalados) { [void]$lb.Items.Add($i.Name) }
+    $dlg.Controls.Add($lb)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = 'REMOVER'; $ok.Location = New-Object System.Drawing.Point(214, 380)
+    $ok.Size = New-Object System.Drawing.Size(100, 34)
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $ok.FlatStyle = 'Flat'; $ok.ForeColor = (ParaCor $script:Paleta.Rosa)
+    $dlg.Controls.Add($ok)
+
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'CANCELAR'; $cancel.Location = New-Object System.Drawing.Point(328, 380)
+    $cancel.Size = New-Object System.Drawing.Size(100, 34)
+    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $cancel.FlatStyle = 'Flat'
+    $dlg.Controls.Add($cancel)
+    $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
+
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $marcados = @($lb.CheckedItems)
+        foreach ($nome in $marcados) {
+            foreach ($pkg in ($instalados | Where-Object { $_.Name -eq $nome })) {
+                try {
+                    Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+                    Log "Removido: $nome" Green
+                } catch {
+                    Log "Falha ao remover ${nome}: $($_.Exception.Message)" Yellow
+                }
+            }
+        }
+        if ($marcados.Count -eq 0) { Log 'Nada selecionado.' Yellow }
+    } else {
+        Log 'Cancelado.' Yellow
+    }
+    $dlg.Dispose()
+}
+
+# ============================================================
+#  REDE
+# ============================================================
+function Otimizar-Rede {
+    Log '--- Rede ---' Cyan
+    ipconfig /flushdns | Out-Null
+    Log 'Cache DNS limpo.' Green
+    foreach ($alvo in @('1.1.1.1', '8.8.8.8')) {
+        $ms = Medir-Latencia $alvo
+        if ($null -ne $ms) { Log "Latencia media para ${alvo}: $ms ms" } else { Log "Sem resposta de $alvo" Yellow }
+    }
+}
+
+function Aplicar-DNS {
+    param([string]$Opcao)
+    Log "--- DNS: $Opcao ---" Cyan
+    $adaptadores = @(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' })
+    foreach ($a in $adaptadores) {
+        try {
+            # Guarda a configuracao IPv4 original de cada adaptador apenas uma vez.
+            # Um array vazio significa DNS automatico/DHCP e tambem precisa ser restaurado.
+            if ($Opcao -ne 'Automatico') {
+                $chaveBackup = "DNSOriginal|$($a.ifIndex)"
+                if ($null -eq (Ler-Backup $chaveBackup)) {
+                    $dnsOriginal = @(Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction Stop |
+                        Select-Object -ExpandProperty ServerAddresses)
+                    Salvar-Backup -Chave $chaveBackup -Valor ([pscustomobject]@{
+                        InterfaceIndex = [int]$a.ifIndex
+                        InterfaceAlias = [string]$a.Name
+                        ServerAddresses = @($dnsOriginal)
+                    })
+                }
+            }
+
+            if ($Opcao -eq 'Cloudflare') {
+                Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @('1.1.1.1', '1.0.0.1') -ErrorAction Stop
+            } elseif ($Opcao -eq 'Google') {
+                Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ServerAddresses @('8.8.8.8', '8.8.4.4') -ErrorAction Stop
+            } else {
+                Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop
+            }
+            Log "Adaptador $($a.Name): DNS $Opcao aplicado." Green
+        } catch {
+            Log "Falha no adaptador $($a.Name): $($_.Exception.Message)" Yellow
+        }
+    }
+    if ($Opcao -ne 'Automatico') { Salvar-Backup -Chave 'DNSAlterado' -Valor 1 }
+    ipconfig /flushdns | Out-Null
+}
+
+# ============================================================
+#  DISCO
+# ============================================================
+function Saude-Disco {
+    Log '=== Saude dos discos ===' Cyan
+    foreach ($pd in Get-PhysicalDisk) {
+        $tam = [math]::Round($pd.Size / 1GB)
+        $cor = if ($pd.HealthStatus -eq 'Healthy') { 'Green' } else { 'Red' }
+        Log ("{0} | {1} | {2} GB | Saude: {3}" -f $pd.FriendlyName, $pd.MediaType, $tam, $pd.HealthStatus) $cor
+        $c = $pd | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
+        if ($c) {
+            if ($c.Temperature)            { Log ("   Temperatura: {0} C" -f $c.Temperature) }
+            if ($null -ne $c.Wear)         { Log ("   Desgaste (SSD): {0}%" -f $c.Wear) }
+            if ($null -ne $c.PowerOnHours) { Log ("   Horas ligado: {0}" -f $c.PowerOnHours) }
+            if ($null -ne $c.ReadErrorsTotal -and $c.ReadErrorsTotal -gt 0) {
+                Log ("   ATENCAO: {0} erros de leitura registrados" -f $c.ReadErrorsTotal) Red
+            }
+        }
+    }
+    Log '--- Espaco livre ---' Cyan
+    foreach ($v in Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter }) {
+        $pct = [math]::Round(($v.SizeRemaining / $v.Size) * 100)
+        $cor = if ($pct -lt $script:LimiteEspacoLivre) { 'Red' } else { 'Green' }
+        Log ("{0}: {1} GB livres de {2} GB ({3}%)" -f $v.DriveLetter, [math]::Round($v.SizeRemaining / 1GB), [math]::Round($v.Size / 1GB), $pct) $cor
+        if ($pct -lt $script:LimiteEspacoLivre) {
+            Log "   Pouco espaco livre em $($v.DriveLetter): - prejudica o desempenho e a vida util do SSD." Yellow
+        }
+    }
+}
+
+function Verificar-Disco {
+    Log '=== Verificacao do sistema de arquivos (somente leitura) ===' Cyan
+    foreach ($v in Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter }) {
+        $letra = [string]$v.DriveLetter
+        Log "Verificando ${letra}: ..."
+        $r = Rodar-EmJob { param($l) Repair-Volume -DriveLetter $l -Scan } @($letra)
+        $txt = "$r".Trim()
+        if ($txt -eq 'NoErrorsFound') {
+            Log "Resultado de ${letra}: nenhum erro encontrado." Green
+        } elseif ($txt) {
+            Log "Resultado de ${letra}: $txt - considere agendar a verificacao com reparo." Red
+        } else {
+            Log "Resultado de ${letra}: indeterminado." Yellow
+        }
+    }
+}
+
+function Otimizar-Disco {
+    Log '=== Otimizacao de discos ===' Cyan
+    foreach ($v in Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.DriveLetter }) {
+        $letra = [string]$v.DriveLetter
+        $tipo = 'Unspecified'
+        try {
+            $disk = Get-Partition -DriveLetter $letra -ErrorAction Stop | Get-Disk
+            $pd = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq "$($disk.Number)" }
+            if ($pd) { $tipo = [string]$pd.MediaType }
+        } catch { }
+
+        $bloco = {
+            param($l, $m)
+            if ($m -eq 'ReTrim') { Optimize-Volume -DriveLetter $l -ReTrim }
+            elseif ($m -eq 'Defrag') { Optimize-Volume -DriveLetter $l -Defrag }
+            else { Optimize-Volume -DriveLetter $l -Analyze }
+        }
+        if ($tipo -eq 'SSD') {
+            Log "${letra}: e SSD -> executando TRIM (nunca desfragmentar SSD)."
+            [void](Rodar-EmJob $bloco @($letra, 'ReTrim'))
+            Log "TRIM concluido em ${letra}:" Green
+        } elseif ($tipo -eq 'HDD') {
+            Log "${letra}: e HDD -> desfragmentando (pode demorar)."
+            [void](Rodar-EmJob $bloco @($letra, 'Defrag'))
+            Log "Desfragmentacao concluida em ${letra}:" Green
+        } else {
+            Log "${letra}: tipo nao identificado -> apenas analise (seguro)."
+            [void](Rodar-EmJob $bloco @($letra, 'Analyze'))
+        }
+    }
+}
+
+function Agendar-VerificacaoReparo {
+    Log '=== Agendar verificacao com reparo (CHKDSK) ===' Cyan
+    $unid = [Microsoft.VisualBasic.Interaction]::InputBox('Letra da unidade a verificar na proxima reinicializacao (ex: C):', 'Verificacao com reparo', 'C')
+    $unid = "$unid".Trim().TrimEnd(':')
+    if ($unid -notmatch '^[a-zA-Z]$') { Log 'Cancelado ou letra invalida.' Yellow; return }
+    if (Confirmar "Marcar ${unid}: para ser verificado e reparado na proxima reinicializacao? Isso pode demorar na inicializacao.") {
+        fsutil dirty set "${unid}:" | Out-Null
+        Log "Unidade ${unid}: marcada. O Windows fara a verificacao ao reiniciar." Green
+    } else {
+        Log 'Cancelado.' Yellow
+    }
+}
+
+function Verificar-ArquivosWindows {
+    Log '=== SFC: verificando arquivos do Windows (demorado) ===' Cyan
+    $p = Start-Process -FilePath 'sfc.exe' -ArgumentList '/scannow' -WindowStyle Hidden -PassThru
+    while (-not $p.HasExited) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 300
+    }
+    if ($p.ExitCode -eq 0) { Log 'SFC finalizado: nenhuma violacao de integridade.' Green }
+    else { Log "SFC finalizado (codigo $($p.ExitCode)). Detalhes em %windir%\Logs\CBS\CBS.log" Yellow }
+}
+
+function Benchmark-Disco {
+    Log '=== Benchmark do disco (arquivo temporario de 512 MB) ===' Cyan
+    $tamMB = 512
+    $arq = Join-Path $env:TEMP 'otg_bench.tmp'
+    $bloco = New-Object byte[] 1048576
+    (New-Object System.Random).NextBytes($bloco)
+    try {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $fs = New-Object System.IO.FileStream($arq, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 1048576, [System.IO.FileOptions]::WriteThrough)
+        for ($i = 0; $i -lt $tamMB; $i++) {
+            $fs.Write($bloco, 0, $bloco.Length)
+            if ($i % 32 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+        }
+        $fs.Flush($true); $fs.Dispose(); $sw.Stop()
+        $w = [math]::Round($tamMB / $sw.Elapsed.TotalSeconds)
+        Log "Escrita sequencial: $w MB/s" Green
+
+        $sw.Restart()
+        $fs = New-Object System.IO.FileStream($arq, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None, 1048576, [System.IO.FileOptions]::SequentialScan)
+        $lido = 0
+        while (($n = $fs.Read($bloco, 0, $bloco.Length)) -gt 0) {
+            $lido += $n
+            if (($lido / 1048576) % 32 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
+        }
+        $fs.Dispose(); $sw.Stop()
+        $r = [math]::Round(($lido / 1MB) / $sw.Elapsed.TotalSeconds)
+        Log "Leitura sequencial: $r MB/s (pode estar acima do real por causa do cache do Windows)" Green
+    } catch {
+        Log "Falha no benchmark: $($_.Exception.Message)" Red
+    } finally {
+        if (Test-Path $arq) { Remove-Item $arq -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# ============================================================
+#  RELATORIO ANTES x DEPOIS
+# ============================================================
+function Snapshot {
+    $sysLetra = $env:SystemDrive.TrimEnd(':')
+    $vol = Get-Volume -DriveLetter $sysLetra
+    [pscustomobject]@{
+        LivreGB   = [math]::Round($vol.SizeRemaining / 1GB, 1)
+        RamPct    = Uso-RAM
+        Processos = @(Get-Process).Count
+        Latencia  = Medir-Latencia '1.1.1.1'
+    }
+}
+
+function Mostrar-Relatorio {
+    param($A, $D)
+    $linhas = @()
+    $linhas += '=== RELATORIO ANTES x DEPOIS ==='
+    $linhas += ("Espaco livre no sistema: {0} GB -> {1} GB ({2} GB)" -f $A.LivreGB, $D.LivreGB, [math]::Round($D.LivreGB - $A.LivreGB, 1))
+    $linhas += ("RAM em uso: {0}% -> {1}%" -f $A.RamPct, $D.RamPct)
+    $linhas += ("Processos em execucao: {0} -> {1}" -f $A.Processos, $D.Processos)
+    if ($null -ne $A.Latencia -and $null -ne $D.Latencia) {
+        $linhas += ("Latencia (1.1.1.1): {0} ms -> {1} ms" -f $A.Latencia, $D.Latencia)
+    }
+    foreach ($l in $linhas) { Log $l Cyan }
+    Add-Content -Path $script:RelatorioFile -Value ("`r`n--- {0} ---" -f (Get-Date -Format 'dd/MM/yyyy HH:mm')) -Encoding UTF8
+    Add-Content -Path $script:RelatorioFile -Value $linhas -Encoding UTF8
+}
+
+# ============================================================
+#  AGENDAMENTO
+# ============================================================
+function Agendar-Manutencao {
+    Log '--- Agendando manutencao semanal ---' Cyan
+    try {
+        if ($script:EhExe) {
+            # Copia o executavel para uma pasta fixa: a tarefa continua funcionando mesmo se o .exe for movido.
+            $destinoExe = Join-Path $script:Pasta 'OtimizadorGamer.exe'
+            if ($script:CaminhoScript -ne $destinoExe) {
+                try { Copy-Item -Path $script:CaminhoScript -Destination $destinoExe -Force -ErrorAction Stop }
+                catch { if (-not (Test-Path $destinoExe)) { throw } }
+            }
+            $acao = New-ScheduledTaskAction -Execute $destinoExe -Argument '-Manutencao'
+        } else {
+            $acao = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"{0}`" -Manutencao" -f $script:CaminhoScript)
+        }
+        $gatilho = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '04:00'
+        $princ = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+        $cfg = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName 'OtimizadorGamer-Manutencao' -Action $acao -Trigger $gatilho -Principal $princ -Settings $cfg -Force | Out-Null
+        Log 'Agendado: todo domingo as 04:00 (limpeza + verificacao e otimizacao de disco). Se o PC estiver desligado, roda ao ligar.' Green
+    } catch {
+        Log "Falha ao agendar: $($_.Exception.Message)" Red
+    }
+}
+
+function Remover-Agendamento {
+    try {
+        Unregister-ScheduledTask -TaskName 'OtimizadorGamer-Manutencao' -Confirm:$false -ErrorAction Stop
+        Log 'Agendamento removido.' Green
+    } catch {
+        Log 'Nao havia agendamento para remover.' Yellow
+    }
+}
+
+# ============================================================
+#  MODO MANUTENCAO (sem interface, usado pela tarefa agendada)
+# ============================================================
+if ($Manutencao) {
+    Log '=== Manutencao automatica semanal ===' Cyan
+    Limpar-Temporarios
+    Saude-Disco
+    Verificar-Disco
+    Otimizar-Disco
+    Log 'Manutencao concluida.' Green
+    exit
+}
+
+# ============================================================
+#  MONITORAMENTO, ALERTAS E DETECCAO DE JOGOS
+# ============================================================
+function Monitorar-Console {
+    Log '--- Monitoramento (10 amostras) ---' Cyan
+    for ($i = 1; $i -le 10; $i++) {
+        $g = Info-GPU
+        $linha = "CPU: $(Uso-CPU)%  |  RAM: $(Uso-RAM)%"
+        if ($null -ne $g.Uso) { $linha += "  |  GPU: $($g.Uso)% a $($g.Temp) C" }
+        Log $linha
+        for ($k = 0; $k -lt 10; $k++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+    }
+}
+
+function Alertar {
+    param([string]$Chave, [string]$Msg)
+    $agora = Get-Date
+    if ($script:UltimoAlerta.ContainsKey($Chave) -and (($agora - $script:UltimoAlerta[$Chave]).TotalMinutes -lt 5)) { return }
+    $script:UltimoAlerta[$Chave] = $agora
+    Log "ALERTA: $Msg" Red
+    $script:Tray.ShowBalloonTip(6000, 'Alerta de temperatura', $Msg, [System.Windows.Forms.ToolTipIcon]::Warning)
+}
+
+function Verificar-Jogos {
+    if (-not $script:ChkAuto.Checked) { return }
+    $rodando = $null
+    foreach ($j in $script:Jogos) {
+        if (Get-Process -Name $j -ErrorAction SilentlyContinue) { $rodando = $j; break }
+    }
+    if ($rodando -and -not $script:ModoJogoAtivo) {
+        $script:ModoJogoAtivo = $true
+        $script:JogoAtual = $rodando
+        $script:LblStatusJogo.Text = "Jogo detectado: $rodando  (Modo Performance ATIVO)"
+        $script:LblStatusJogo.ForeColor = (ParaCor $script:Paleta.Neon)
+        Log "Jogo detectado: $rodando" Magenta
+        Entrar-ModoPerformance
+        Otimizar-ProcessoJogo $rodando
+        $script:Tray.ShowBalloonTip(3000, 'Otimizador Gamer', "Modo Performance ativado para $rodando", [System.Windows.Forms.ToolTipIcon]::Info)
+    } elseif (-not $rodando -and $script:ModoJogoAtivo) {
+        $script:ModoJogoAtivo = $false
+        Log "Jogo encerrado: $($script:JogoAtual)" Magenta
+        $script:JogoAtual = $null
+        Sair-ModoPerformance
+        $script:LblStatusJogo.Text = 'Aguardando um jogo da lista...'
+        $script:LblStatusJogo.ForeColor = (ParaCor $script:Paleta.Mudo)
+    }
+}
+
+function Nome-PlanoEnergia {
+    try {
+        $saida = (powercfg /getactivescheme | Out-String)
+        $m = [regex]::Matches($saida, '\(([^\)]+)\)')
+        if ($m.Count -gt 0) { return $m[$m.Count - 1].Groups[1].Value }
+    } catch { }
+    return '--'
+}
+
+function Definir-Barra {
+    param($Card, $Pct)
+    if ($null -eq $Pct) { $Card.Barra.Width = 0; return }
+    $p = [math]::Max(0, [math]::Min(100, [int]$Pct))
+    $Card.Barra.Width = [int]($Card.Trilho.Width * $p / 100)
+    if ($p -ge 90) { $cor = '#FF5C7A' } elseif ($p -ge 75) { $cor = $script:Paleta.Amarelo } else { $cor = $Card.Cor }
+    $Card.Barra.BackColor = (ParaCor $cor)
+}
+
+function Atualizar-Painel {
+    $cpu = Uso-CPU
+    $ram = Uso-RAM
+    $gpu = Info-GPU
+    $tc = Temp-CPU
+    $script:TickN++
+    if ($script:TickN % 20 -eq 1) { $script:TempDisco = Temp-Disco }
+    if ($script:TickN % 10 -eq 1) { $script:LblPlano.Text = Nome-PlanoEnergia }
+    Add-Hist $cpu $gpu.Uso $tc $gpu.Temp
+
+    $script:CardCPU.Valor.Text = if ($null -ne $cpu) { "$cpu%" } else { 'N/D' }
+    Definir-Barra $script:CardCPU $cpu
+    $script:CardRAM.Valor.Text = if ($null -ne $ram) { "$ram%" } else { 'N/D' }
+    Definir-Barra $script:CardRAM $ram
+    $script:CardGPU.Valor.Text = if ($null -ne $gpu.Uso) { "$($gpu.Uso)%" } else { 'N/D' }
+    Definir-Barra $script:CardGPU $gpu.Uso
+
+    $tcTxt = if ($null -ne $tc) { "$tc" } else { '--' }
+    $tgTxt = if ($null -ne $gpu.Temp) { "$($gpu.Temp)" } else { '--' }
+    $script:CardTemp.Valor.Text = "$tcTxt / $tgTxt" + [char]0x00B0
+    $maxT = $null
+    if ($null -ne $tc) { $maxT = $tc }
+    if ($null -ne $gpu.Temp -and ($null -eq $maxT -or $gpu.Temp -gt $maxT)) { $maxT = $gpu.Temp }
+    Definir-Barra $script:CardTemp $maxT
+
+    try {
+        $v = Get-Volume -DriveLetter ($env:SystemDrive.TrimEnd(':'))
+        $script:CardDisco.Valor.Text = "{0} GB livres" -f [math]::Round($v.SizeRemaining / 1GB)
+        Definir-Barra $script:CardDisco ([int](100 - (100 * $v.SizeRemaining / $v.Size)))
+    } catch { }
+
+    if ($script:ModoJogoAtivo) { $script:LblModoPerf.Text = "Ativo - $($script:JogoAtual)" }
+    elseif ($script:PlanoAnterior) { $script:LblModoPerf.Text = 'Ativo (manual)' }
+    else { $script:LblModoPerf.Text = 'Inativo' }
+    $script:LblDeteccao.Text = if ($script:ChkAuto.Checked) { 'Ligada' } else { 'Desligada' }
+
+    if ($script:ChkAlertas.Checked) {
+        if ($null -ne $tc -and $tc -ge [int]$script:NumCpu.Value) { Alertar 'cpu' "CPU a $tc C (limite $([int]$script:NumCpu.Value) C)" }
+        if ($null -ne $gpu.Temp -and $gpu.Temp -ge [int]$script:NumGpu.Value) { Alertar 'gpu' "GPU a $($gpu.Temp) C (limite $([int]$script:NumGpu.Value) C)" }
+        if ($null -ne $script:TempDisco -and $script:TempDisco -ge [int]$script:NumDisco.Value) { Alertar 'disco' "Disco a $($script:TempDisco) C (limite $([int]$script:NumDisco.Value) C)" }
+    }
+}
+
+function Salvar-Config {
+    $script:Cfg = @{
+        CpuMax = [int]$script:NumCpu.Value; GpuMax = [int]$script:NumGpu.Value; DiscoMax = [int]$script:NumDisco.Value
+        Alertas = [bool]$script:ChkAlertas.Checked; Auto = [bool]$script:ChkAuto.Checked
+    }
+    $script:Cfg | ConvertTo-Json | Set-Content -Path $script:CfgFile -Encoding UTF8
+}
+
+function Salvar-Jogos {
+    ConvertTo-Json -InputObject @($script:Jogos) | Set-Content -Path $script:JogosFile -Encoding UTF8
+}
+
+# ============================================================
+#  ESTADO DO RELATORIO E DO HISTORICO
+# ============================================================
+$script:Achados = New-Object System.Collections.ArrayList
+$script:Etapas = New-Object System.Collections.ArrayList
+$script:UltimoAntes = $null
+$script:UltimoDepois = $null
+$script:ToastAnterior = $null
+$script:Grafico = $null
+$script:Hist = New-Object System.Collections.ArrayList
+for ($ih = 0; $ih -lt 4; $ih++) { [void]$script:Hist.Add((New-Object System.Collections.ArrayList)) }
+$script:HistHoras = New-Object System.Collections.ArrayList
+
+function Adicionar-Achado {
+    param([string]$Area, [string]$Texto, [string]$Nivel = 'ok')
+    [void]$script:Achados.Add([pscustomobject]@{ Area = $Area; Texto = $Texto; Nivel = $Nivel })
+}
+
+function Registrar-Etapa {
+    param([string]$Rotulo, [string]$Status)
+    [void]$script:Etapas.Add([pscustomobject]@{ Rotulo = $Rotulo; Status = $Status })
+}
+
+function Rodar-Processo {
+    # Executa um programa oculto, mantendo a janela responsiva; devolve codigo de saida e texto
+    param([string]$Exe, [string]$Argumentos)
+    $tmp = Join-Path $env:TEMP ('otg_' + [guid]::NewGuid().ToString('N') + '.txt')
+    $p = Start-Process -FilePath $Exe -ArgumentList $Argumentos -WindowStyle Hidden -PassThru -RedirectStandardOutput $tmp -ErrorAction Stop
+    while (-not $p.HasExited) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 300
+    }
+    $saida = ''
+    if (Test-Path $tmp) {
+        $saida = [string](Get-Content $tmp -Raw -ErrorAction SilentlyContinue)
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
+    return @{ Codigo = $p.ExitCode; Saida = $saida }
+}
+
+function Tem-Bateria {
+    try { return (@(Get-CimInstance Win32_Battery -ErrorAction Stop).Count -gt 0) } catch { return $false }
+}
+
+# ============================================================
+#  NUCLEOS, PRIORIDADE DO JOGO E NOTIFICACOES
+# ============================================================
+function Info-CPU {
+    $c = @(Get-CimInstance Win32_Processor)
+    $fis = ($c | Measure-Object -Property NumberOfCores -Sum).Sum
+    $log = ($c | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+    return @{ Nome = ([string]$c[0].Name).Trim(); Fisicos = [int]$fis; Logicos = [int]$log; ClockMax = [int]$c[0].MaxClockSpeed }
+}
+
+function Ler-LimiteBoot {
+    param([string]$Chave)
+    $saida = bcdedit /enum '{current}' 2>$null
+    foreach ($l in $saida) {
+        if ($l -match ('^\s*' + $Chave + '\s+(\S+)')) { return $Matches[1] }
+    }
+    return $null
+}
+
+function Ler-IndiceAC {
+    param([string]$Guid, [string]$Cfg)
+    $saida = (powercfg /query $Guid SUB_PROCESSOR $Cfg 2>$null | Out-String)
+    $m = [regex]::Matches($saida, '0x[0-9a-fA-F]{8}')
+    if ($m.Count -ge 2) { return [Convert]::ToInt32($m[$m.Count - 2].Value.Substring(2), 16) }
+    return $null
+}
+
+function Liberar-Nucleos {
+    Log '--- Liberar todos os núcleos ---' Cyan
+    $i = Info-CPU
+    Log ("CPU: {0} | {1} núcleos físicos | {2} threads" -f $i.Nome, $i.Fisicos, $i.Logicos)
+    if ($i.Logicos -gt $i.Fisicos) { Log 'Multithreading (SMT/Hyper-Threading) ativo.' Green }
+    else { Log 'Sem multithreading (ou desativado na BIOS).' Yellow }
+
+    $limite = Ler-LimiteBoot 'numproc'
+    if ($null -ne $limite) {
+        Log "Limite de processadores encontrado no boot ($limite). Removendo..." Yellow
+        bcdedit /deletevalue numproc | Out-Null
+        Log 'Limite removido. Reinicie o PC para aplicar.' Green
+        Adicionar-Achado 'Núcleos' "Havia um limite de $limite processadores no boot; foi removido (reinicie para aplicar)." 'aviso'
+    } else {
+        Log 'Nenhum limite de núcleos no boot: o Windows já usa todos.' Green
+        Adicionar-Achado 'Núcleos' "Todos os $($i.Logicos) threads estão liberados no boot." 'ok'
+    }
+    $um = Ler-LimiteBoot 'onecpu'
+    if ($um -match '^(Yes|Sim)$') {
+        bcdedit /deletevalue onecpu | Out-Null
+        Log 'Modo de 1 processador removido do boot.' Green
+    }
+
+    $guid = Plano-Atual
+    if ($guid) {
+        foreach ($cfg in @('CPMINCORES', 'PROCTHROTTLEMIN')) {
+            $ant = Ler-IndiceAC $guid $cfg
+            if ($null -ne $ant) { Salvar-Backup -Chave "Energia|$guid|$cfg" -Valor $ant }
+            powercfg /setacvalueindex $guid SUB_PROCESSOR $cfg 100 | Out-Null
+        }
+        powercfg /setactive $guid | Out-Null
+        Log 'Core parking desativado e estado mínimo do processador em 100% (na tomada).' Green
+        Adicionar-Achado 'Núcleos' 'Core parking desativado e estado mínimo do processador em 100% (na tomada).' 'ok'
+    }
+}
+
+function Otimizar-ProcessoJogo {
+    param([string]$Nome)
+    $n = [Environment]::ProcessorCount
+    foreach ($p in @(Get-Process -Name $Nome -ErrorAction SilentlyContinue)) {
+        try {
+            $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+            Log "Prioridade ALTA: $($p.ProcessName) (PID $($p.Id))" Green
+        } catch {
+            Log "Não foi possível mudar a prioridade (jogos com anti-cheat podem bloquear): $($_.Exception.Message)" Yellow
+        }
+        if ($n -le 62) {
+            try {
+                $p.ProcessorAffinity = [IntPtr]([int64]([math]::Pow(2, $n) - 1))
+                Log "Afinidade: todos os $n threads liberados para o jogo."
+            } catch { }
+        }
+    }
+}
+
+function Silenciar-Notificacoes {
+    if ($null -ne $script:ToastAnterior) { return }
+    $k = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications'
+    $atual = (Get-ItemProperty -Path $k -Name ToastEnabled -ErrorAction SilentlyContinue).ToastEnabled
+    if ($null -eq $atual) { $atual = 1 }
+    $script:ToastAnterior = [int]$atual
+    Definir-Reg $k 'ToastEnabled' 0
+    Log 'Notificações do Windows silenciadas durante o Modo Performance.' Green
+}
+
+function Restaurar-Notificacoes {
+    if ($null -eq $script:ToastAnterior) { return }
+    $k = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications'
+    try { Set-ItemProperty -Path $k -Name ToastEnabled -Value $script:ToastAnterior -Type DWord } catch { }
+    $script:ToastAnterior = $null
+    Log 'Notificações do Windows restauradas.' Green
+}
+
+# ============================================================
+#  DIAGNOSTICOS
+# ============================================================
+function Diagnostico-PC {
+    Log '--- Diagnóstico do hardware ---' Cyan
+    try {
+        $i = Info-CPU
+        Log ("CPU: {0} | {1} núcleos / {2} threads" -f $i.Nome, $i.Fisicos, $i.Logicos) Green
+        Adicionar-Achado 'CPU' ("{0}: {1} núcleos e {2} threads." -f $i.Nome, $i.Fisicos, $i.Logicos) 'info'
+    } catch { Log 'Não foi possível ler a CPU.' Yellow }
+
+    try {
+        $mods = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop)
+        $totalGB = [math]::Round((($mods | Measure-Object -Property Capacity -Sum).Sum) / 1GB)
+        Log "RAM: $totalGB GB em $($mods.Count) pente(s)" Green
+        Adicionar-Achado 'Memória' "$totalGB GB de RAM em $($mods.Count) pente(s)." 'info'
+        foreach ($m in $mods) {
+            $nom = [int]$m.Speed; $conf = [int]$m.ConfiguredClockSpeed
+            if ($nom -gt 0 -and $conf -gt 0) {
+                Log ("   Pente: {0} MHz (nominal {1} MHz)" -f $conf, $nom)
+                if ($conf -lt $nom) {
+                    Log '   Rodando abaixo da velocidade nominal: pode faltar ativar XMP/EXPO na BIOS.' Yellow
+                    Adicionar-Achado 'Memória' "RAM a $conf MHz, abaixo dos $nom MHz nominais: verifique XMP/EXPO na BIOS." 'aviso'
+                }
+            }
+        }
+        if ($mods.Count -eq 1) {
+            Log 'Apenas 1 pente de RAM (canal único). Dois pentes iguais rendem mais em jogos.' Yellow
+            Adicionar-Achado 'Memória' 'Apenas 1 pente de RAM (canal único): dois pentes iguais (dual channel) rendem mais.' 'aviso'
+        }
+    } catch { Log 'Não foi possível ler a memória.' Yellow }
+
+    try {
+        foreach ($v in @(Get-CimInstance Win32_VideoController -ErrorAction Stop)) {
+            if ($v.CurrentRefreshRate) {
+                Log ("Vídeo: {0} | {1}x{2} a {3} Hz" -f $v.Name, $v.CurrentHorizontalResolution, $v.CurrentVerticalResolution, $v.CurrentRefreshRate)
+                if ([int]$v.CurrentRefreshRate -le 60) {
+                    Adicionar-Achado 'Vídeo' ("{0} a {1} Hz. Se o monitor for de 120/144/165 Hz, ajuste em Configurações > Tela > Tela avançada." -f $v.Name, $v.CurrentRefreshRate) 'aviso'
+                } else {
+                    Adicionar-Achado 'Vídeo' ("{0} a {1} Hz." -f $v.Name, $v.CurrentRefreshRate) 'ok'
+                }
+            }
+        }
+    } catch { }
+
+    $hags = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers' -Name HwSchMode -ErrorAction SilentlyContinue).HwSchMode
+    if ($hags -eq 2) { Log 'HAGS (agendamento de GPU por hardware): ligado.' Green }
+    elseif ($hags -eq 1) { Log 'HAGS (agendamento de GPU por hardware): desligado.' Gray }
+}
+
+function Diagnostico-Sistema {
+    Log '--- Tempo ligado e reinício pendente ---' Cyan
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $dias = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalDays, 1)
+        if ($dias -gt 7) {
+            Log "O PC está ligado há $dias dias sem reiniciar." Yellow
+            Adicionar-Achado 'Sistema' "PC ligado há $dias dias sem reiniciar: reinicie (use Reiniciar, não Desligar)." 'aviso'
+        } else {
+            Log "Tempo desde a última inicialização: $dias dias." Green
+            Adicionar-Achado 'Sistema' "Tempo desde a última inicialização: $dias dias." 'ok'
+        }
+    } catch { }
+    $fast = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
+    if ($fast -eq 1) {
+        Log 'Inicialização rápida ativada: "Desligar" não reinicia o sistema de verdade; use "Reiniciar" para aplicar atualizações.' Gray
+    }
+    $motivos = @()
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $motivos += 'componentes do Windows' }
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $motivos += 'Windows Update' }
+    $pfro = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+    if ($pfro) { $motivos += 'arquivos aguardando troca' }
+    if ($motivos.Count -gt 0) {
+        $txt = $motivos -join ', '
+        Log "Reinício pendente ($txt)." Yellow
+        Adicionar-Achado 'Sistema' "Reinício pendente ($txt): reinicie o PC para concluir." 'aviso'
+    } else {
+        Log 'Nenhum reinício pendente.' Green
+        Adicionar-Achado 'Sistema' 'Nenhum reinício pendente.' 'ok'
+    }
+}
+
+function Diagnostico-Eventos {
+    Log '--- Erros do Windows (últimos 7 dias) ---' Cyan
+    $desde = (Get-Date).AddDays(-7)
+    $erros = @()
+    try {
+        $erros = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 1, 2; StartTime = $desde } -MaxEvents 800 -ErrorAction Stop)
+    } catch {
+        if ($_.FullyQualifiedErrorId -notlike 'NoMatchingEventsFound*') {
+            Log "Não foi possível ler o log do sistema: $($_.Exception.Message)" Yellow
+            Adicionar-Achado 'Eventos' 'Não foi possível ler o log de eventos do sistema.' 'aviso'
+            return
+        }
+    }
+    if ($erros.Count -eq 0) {
+        Log 'Nenhum erro crítico no log do sistema nos últimos 7 dias.' Green
+        Adicionar-Achado 'Eventos' 'Nenhum erro crítico no log do sistema (7 dias).' 'ok'
+    } else {
+        Log ("{0} eventos de erro ou críticos no log do sistema." -f $erros.Count) Yellow
+        $grupos = @($erros | Group-Object ProviderName | Sort-Object Count -Descending | Select-Object -First 6)
+        foreach ($g in $grupos) { Log ("   {0}: {1}x" -f $g.Name, $g.Count) }
+        $kp = @($erros | Where-Object { $_.ProviderName -eq 'Microsoft-Windows-Kernel-Power' -and $_.Id -eq 41 }).Count
+        $disco = @($erros | Where-Object { $_.ProviderName -in @('disk', 'Ntfs', 'volmgr', 'stornvme', 'storahci') }).Count
+        $whea = @($erros | Where-Object { $_.ProviderName -eq 'Microsoft-Windows-WHEA-Logger' }).Count
+        $video = @($erros | Where-Object { $_.ProviderName -in @('nvlddmkm', 'amdkmdag', 'amdwddmg', 'igfx', 'Display') }).Count
+        if ($kp -gt 0) { Adicionar-Achado 'Eventos' "Reinicializações inesperadas: $kp (queda de energia, travamento ou superaquecimento)." 'erro' }
+        if ($disco -gt 0) { Adicionar-Achado 'Eventos' "Erros de disco ou sistema de arquivos: $disco. Verifique a saúde do disco." 'erro' }
+        if ($whea -gt 0) { Adicionar-Achado 'Eventos' "Erros de hardware (WHEA): $whea. Pode indicar CPU, RAM ou placa-mãe com problema." 'erro' }
+        if ($video -gt 0) { Adicionar-Achado 'Eventos' "Falhas do driver de vídeo: $video. Atualize ou reinstale o driver." 'aviso' }
+        if (($kp + $disco + $whea + $video) -eq 0) {
+            Adicionar-Achado 'Eventos' ("{0} erros no log do sistema, sem padrão crítico de disco, hardware ou energia." -f $erros.Count) 'aviso'
+        }
+    }
+    try {
+        $app = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; Id = 1000; StartTime = $desde } -MaxEvents 300 -ErrorAction Stop)
+        if ($app.Count -gt 0) {
+            $topo = @($app | ForEach-Object { [string]$_.Properties[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5)
+            $resumo = ($topo | ForEach-Object { "{0} ({1}x)" -f $_.Name, $_.Count }) -join ', '
+            Log "Aplicativos que travaram: $resumo" Yellow
+            Adicionar-Achado 'Eventos' "Aplicativos que travaram nos últimos 7 dias: $resumo." 'aviso'
+        }
+    } catch { }
+}
+
+function Verificar-Drivers {
+    param([bool]$Abrir = $true)
+    Log '--- Drivers de vídeo ---' Cyan
+    $url = $null
+    try {
+        foreach ($g in @(Get-CimInstance Win32_VideoController -ErrorAction Stop)) {
+            $ver = [string]$g.DriverVersion
+            $txt = $ver
+            if ($g.Name -match 'NVIDIA' -and $ver -match '^\d+\.\d+\.(\d+)\.(\d+)$') {
+                $num = $Matches[1] + $Matches[2]
+                $num = $num.Substring($num.Length - 5)
+                $txt = "{0}.{1} (versão NVIDIA)" -f $num.Substring(0, 3), $num.Substring(3)
+            }
+            $dataTxt = 'data desconhecida'
+            $idade = $null
+            if ($g.DriverDate) {
+                $dataTxt = ([datetime]$g.DriverDate).ToString('dd/MM/yyyy')
+                $idade = [int]((Get-Date) - [datetime]$g.DriverDate).TotalDays
+            }
+            Log ("{0}: driver {1}, de {2}" -f $g.Name, $txt, $dataTxt)
+            if ($g.Name -match 'NVIDIA' -and -not $url) { $url = 'https://www.nvidia.com/Download/index.aspx' }
+            elseif ($g.Name -match 'AMD|Radeon' -and -not $url) { $url = 'https://www.amd.com/en/support/download/drivers.html' }
+            elseif ($g.Name -match 'Intel' -and -not $url) { $url = 'https://www.intel.com/content/www/us/en/download-center/home.html' }
+            if ($null -ne $idade -and $idade -gt 180) {
+                Log '   Driver com mais de 6 meses: vale verificar uma versão mais nova.' Yellow
+                Adicionar-Achado 'Drivers' ("{0}: driver {1} de {2} (mais de 6 meses)." -f $g.Name, $txt, $dataTxt) 'aviso'
+            } else {
+                Adicionar-Achado 'Drivers' ("{0}: driver {1} de {2}." -f $g.Name, $txt, $dataTxt) 'ok'
+            }
+        }
+    } catch { Log 'Não foi possível ler os drivers de vídeo.' Yellow; return }
+    if ($Abrir -and $url) {
+        if (Confirmar 'Abrir a página oficial de downloads do fabricante da placa de vídeo?') { Start-Process $url }
+    }
+}
+
+function Saude-Bateria {
+    param([bool]$Abrir = $true)
+    Log '--- Saúde da bateria ---' Cyan
+    if (-not (Tem-Bateria)) {
+        Log 'Nenhuma bateria detectada (desktop).' Gray
+        Adicionar-Achado 'Bateria' 'Nenhuma bateria detectada (computador de mesa).' 'info'
+        return
+    }
+    try {
+        $full = (Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryFullChargedCapacity -ErrorAction Stop | Select-Object -First 1).FullChargedCapacity
+        $proj = (Get-CimInstance -Namespace 'root/wmi' -ClassName BatteryStaticData -ErrorAction Stop | Select-Object -First 1).DesignedCapacity
+        if ($full -and $proj) {
+            $saude = [int][math]::Round(100 * $full / $proj)
+            Log ("Capacidade atual: {0} mWh de {1} mWh de projeto ({2}%)." -f $full, $proj, $saude)
+            if ($saude -lt 60) { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original: recomenda-se troca." 'erro' }
+            elseif ($saude -lt 80) { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original: desgaste moderado." 'aviso' }
+            else { Adicionar-Achado 'Bateria' "Bateria com $saude% da capacidade original." 'ok' }
+        } else {
+            Log 'O fabricante não informa a capacidade da bateria.' Yellow
+        }
+    } catch {
+        Log 'Não foi possível ler a capacidade da bateria.' Yellow
+    }
+    try {
+        $arq = Join-Path $script:Pasta 'bateria.html'
+        powercfg /batteryreport /output $arq | Out-Null
+        if (Test-Path $arq) {
+            Log "Relatório completo de bateria do Windows: $arq" Green
+            if ($Abrir) { Start-Process $arq }
+        }
+    } catch { }
+}
+
+function Diagnostico-Seguranca {
+    Log '--- Segurança e atualizações ---' Cyan
+    try {
+        $avs = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop | ForEach-Object { $_.displayName })
+        if ($avs.Count -gt 0) {
+            Log ("Antivírus registrado: {0}" -f ($avs -join ', ')) Green
+            Adicionar-Achado 'Segurança' ("Antivírus registrado: {0}." -f ($avs -join ', ')) 'ok'
+        } else {
+            Log 'Nenhum antivírus registrado no Windows.' Red
+            Adicionar-Achado 'Segurança' 'Nenhum antivírus registrado no Windows.' 'erro'
+        }
+    } catch { Log 'Não foi possível consultar o Centro de Segurança do Windows.' Yellow }
+    try {
+        $m = Get-MpComputerStatus -ErrorAction Stop
+        if (-not $m.RealTimeProtectionEnabled) {
+            Log 'Proteção em tempo real do Defender desativada.' Yellow
+            Adicionar-Achado 'Segurança' 'Proteção em tempo real do Microsoft Defender desativada.' 'aviso'
+        }
+        $idade = [int]((Get-Date) - $m.AntivirusSignatureLastUpdated).TotalDays
+        if ($idade -gt 7) {
+            Log "Definições do Defender desatualizadas ($idade dias)." Yellow
+            Adicionar-Achado 'Segurança' "Definições do Defender desatualizadas há $idade dias." 'aviso'
+        } else {
+            Log "Definições do Defender atualizadas ($idade dias)." Green
+        }
+    } catch { }
+    try {
+        $ultimo = Get-HotFix -ErrorAction Stop | Where-Object { $_.InstalledOn } | Sort-Object InstalledOn -Descending | Select-Object -First 1
+        if ($ultimo) {
+            $d = [int]((Get-Date) - $ultimo.InstalledOn).TotalDays
+            if ($d -gt 60) {
+                Log "Última atualização do Windows instalada há $d dias." Yellow
+                Adicionar-Achado 'Atualizações' "Última atualização do Windows instalada há $d dias: verifique o Windows Update." 'aviso'
+            } else {
+                Log "Última atualização do Windows instalada há $d dias." Green
+                Adicionar-Achado 'Atualizações' "Última atualização do Windows instalada há $d dias." 'ok'
+            }
+        }
+    } catch { }
+    $wu = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
+    if ($wu -and $wu.StartType -eq 'Disabled') {
+        Log 'O serviço do Windows Update está desativado.' Yellow
+        Adicionar-Achado 'Atualizações' 'O serviço do Windows Update está desativado.' 'aviso'
+    }
+}
+
+function Escanear-Defender {
+    Log '--- Verificação rápida do Microsoft Defender ---' Cyan
+    if (-not (Confirmar 'Executar uma verificação rápida do Microsoft Defender? Pode levar alguns minutos.')) { Log 'Cancelado.' Yellow; return }
+    try {
+        [void](Rodar-EmJob { param($x) Start-MpScan -ScanType QuickScan } @(0))
+        Log 'Verificação rápida concluída.' Green
+        Adicionar-Achado 'Segurança' 'Verificação rápida do Microsoft Defender concluída.' 'ok'
+    } catch {
+        Log "Não foi possível executar a verificação: $($_.Exception.Message)" Yellow
+    }
+}
+
+function Testar-Memoria {
+    Log '--- Teste de memória do Windows ---' Cyan
+    if (Confirmar "O Diagnóstico de Memória do Windows vai oferecer reiniciar o PC para testar a RAM.`n`nSalve seus trabalhos antes. Abrir agora?") {
+        Start-Process mdsched.exe
+        Log 'Diagnóstico de Memória do Windows aberto.' Green
+    } else { Log 'Cancelado.' Yellow }
+}
+
+function Teste-Estabilidade {
+    param([int]$Segundos = 60)
+    Log "--- Teste de estabilidade da CPU ($Segundos s) ---" Cyan
+    if (-not (Confirmar "O teste leva a CPU a 100% por $Segundos segundos e pode esquentar o PC.`n`nEm notebook, conecte o carregador. Continuar?")) { Log 'Cancelado.' Yellow; return }
+    $n = [Environment]::ProcessorCount
+    $jobs = @()
+    $maxT = $null; $somaCpu = 0; $amostras = 0; $perfMin = $null; $perfMax = $null; $abortou = $false
+    try {
+        for ($i = 0; $i -lt $n; $i++) {
+            $jobs += Start-Job -ScriptBlock { $x = 1.0; while ($true) { $x = [math]::Sqrt($x + 12345.678) } }
+        }
+        Log "Estressando $n threads..."
+        $fim = (Get-Date).AddSeconds($Segundos)
+        while ((Get-Date) -lt $fim) {
+            for ($k = 0; $k -lt 20; $k++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+            $cpu = Uso-CPU
+            $tc = Temp-CPU
+            $perf = $null
+            try { $perf = [int](Get-CimInstance Win32_PerfFormattedData_Counters_ProcessorInformation -Filter "Name='_Total'" -ErrorAction Stop).PercentProcessorPerformance } catch { }
+            if ($null -ne $cpu) { $somaCpu += $cpu; $amostras++ }
+            if ($null -ne $tc -and ($null -eq $maxT -or $tc -gt $maxT)) { $maxT = $tc }
+            if ($null -ne $perf) {
+                if ($null -eq $perfMin -or $perf -lt $perfMin) { $perfMin = $perf }
+                if ($null -eq $perfMax -or $perf -gt $perfMax) { $perfMax = $perf }
+            }
+            $linha = "CPU {0}%" -f $cpu
+            if ($null -ne $tc) { $linha += " | temp $tc C" }
+            if ($null -ne $perf) { $linha += " | desempenho $perf%" }
+            Log $linha
+            if ($null -ne $tc -and $tc -ge 95) {
+                $abortou = $true
+                Log 'Temperatura crítica (95 C). Teste interrompido por segurança.' Red
+                break
+            }
+        }
+    } finally {
+        foreach ($j in $jobs) { Stop-Job $j -ErrorAction SilentlyContinue; Remove-Job $j -Force -ErrorAction SilentlyContinue }
+    }
+    $media = 0
+    if ($amostras -gt 0) { $media = [int]($somaCpu / $amostras) }
+    Log "Teste finalizado. Uso médio da CPU: $media%." Green
+    if ($abortou) {
+        Adicionar-Achado 'Estabilidade' 'Teste de estresse interrompido: a CPU atingiu 95 C. Verifique cooler, pasta térmica e ventilação.' 'erro'
+    } elseif ($null -ne $maxT) {
+        if ($maxT -ge 90) { Adicionar-Achado 'Estabilidade' "Teste de estresse: pico de $maxT C (alto). Verifique cooler e pasta térmica." 'erro' }
+        elseif ($maxT -ge 80) { Adicionar-Achado 'Estabilidade' "Teste de estresse: pico de $maxT C (elevado, mas aceitável)." 'aviso' }
+        else { Adicionar-Achado 'Estabilidade' "Teste de estresse de $Segundos s concluído sem travar; pico de $maxT C." 'ok' }
+    } else {
+        Adicionar-Achado 'Estabilidade' "Teste de estresse de $Segundos s concluído sem travar (temperatura da CPU indisponível neste PC)." 'ok'
+    }
+    if ($null -ne $perfMin -and $null -ne $perfMax -and $perfMax -gt 0 -and $perfMin -lt ($perfMax * 0.7)) {
+        Log "A frequência caiu para $perfMin% (pico $perfMax%): possível limitação por calor ou energia." Yellow
+        Adicionar-Achado 'Estabilidade' "Durante o estresse a frequência caiu de $perfMax% para $perfMin%: possível limitação por temperatura ou energia." 'aviso'
+    }
+}
+
+function Diagnostico-Completo {
+    Log '=== Diagnóstico completo ===' Cyan
+    $script:Achados.Clear()
+    $passos = @(
+        @('Hardware', { Diagnostico-PC }),
+        @('Tempo ligado e reinício', { Diagnostico-Sistema }),
+        @('Erros do Windows', { Diagnostico-Eventos }),
+        @('Drivers de vídeo', { Verificar-Drivers $false }),
+        @('Dispositivos com problema', { Verificar-DispositivosProblema }),
+        @('Segurança e atualizações', { Diagnostico-Seguranca }),
+        @('Bateria', { Saude-Bateria $false }),
+        @('Saúde dos discos', { Saude-Disco })
+    )
+    $n = 0
+    foreach ($p in $passos) {
+        $n++
+        Passo $n $passos.Count $p[0]
+        try { & $p[1] } catch { Log "Falha em $($p[0]): $($_.Exception.Message)" Yellow }
+    }
+    $erros = @($script:Achados | Where-Object { $_.Nivel -eq 'erro' }).Count
+    $avisos = @($script:Achados | Where-Object { $_.Nivel -eq 'aviso' }).Count
+    Log ("Diagnóstico concluído: {0} problema(s), {1} ponto(s) de atenção." -f $erros, $avisos) Green
+    Relatorio-HTML-Agora
+}
+
+# ============================================================
+#  REPARO DO WINDOWS (DISM + SFC)
+# ============================================================
+function Reparar-Imagem {
+    Log '--- DISM: reparo da imagem do Windows ---' Cyan
+    Log 'Executando DISM /RestoreHealth (precisa de internet e pode levar vários minutos)...'
+    try {
+        $r = Rodar-Processo 'dism.exe' '/Online /Cleanup-Image /RestoreHealth'
+        if ($r.Codigo -eq 0) {
+            Log 'DISM concluído: imagem do Windows verificada e reparada quando necessário.' Green
+            Adicionar-Achado 'Reparo' 'DISM RestoreHealth concluído sem erros.' 'ok'
+        } else {
+            Log ("DISM terminou com o código {0}. Confira a conexão e o arquivo C:\Windows\Logs\DISM\dism.log" -f $r.Codigo) Yellow
+            Adicionar-Achado 'Reparo' ("DISM RestoreHealth terminou com o código {0}." -f $r.Codigo) 'aviso'
+        }
+    } catch { Log "Não foi possível executar o DISM: $($_.Exception.Message)" Red }
+}
+
+function Reparo-Completo {
+    if (-not (Confirmar "O reparo completo executa o DISM e depois o SFC.`n`nPode levar de 20 a 40 minutos e precisa de internet. Continuar?")) { Log 'Cancelado.' Yellow; return }
+    Passo 1 2 'DISM RestoreHealth'
+    Reparar-Imagem
+    Passo 2 2 'SFC /scannow'
+    Verificar-ArquivosWindows
+}
+
+# ============================================================
+#  LIMPEZA DE NAVEGADORES
+# ============================================================
+function Limpar-Navegadores {
+    Log '--- Limpeza de cache dos navegadores ---' Cyan
+    $abertos = @(Get-Process -Name chrome, msedge, firefox, brave -ErrorAction SilentlyContinue)
+    if ($abertos.Count -gt 0) {
+        if (-not (Confirmar "Há navegadores abertos. Para limpar o cache eles precisam ser fechados.`n`nAs abas abertas serão perdidas; senhas, favoritos e histórico não são afetados. Fechar e continuar?")) {
+            Log 'Cancelado.' Yellow; return
+        }
+        $abertos | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 800
+    }
+    $alvos = New-Object System.Collections.ArrayList
+    foreach ($base in @("$env:LOCALAPPDATA\Google\Chrome\User Data", "$env:LOCALAPPDATA\Microsoft\Edge\User Data", "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data")) {
+        if (Test-Path $base) {
+            foreach ($perfil in @(Get-ChildItem -Path $base -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' })) {
+                foreach ($sub in @('Cache', 'Code Cache', 'GPUCache')) {
+                    $c = Join-Path $perfil.FullName $sub
+                    if (Test-Path $c) { [void]$alvos.Add($c) }
+                }
+            }
+        }
+    }
+    $ff = "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles"
+    if (Test-Path $ff) {
+        foreach ($perfil in @(Get-ChildItem -Path $ff -Directory -ErrorAction SilentlyContinue)) {
+            $c = Join-Path $perfil.FullName 'cache2'
+            if (Test-Path $c) { [void]$alvos.Add($c) }
+        }
+    }
+    if ($alvos.Count -eq 0) { Log 'Nenhum cache de navegador encontrado.' Gray; return }
+    $total = 0
+    foreach ($c in $alvos) {
+        $soma = (Get-ChildItem -Path $c -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        if ($soma) { $total += $soma }
+        Get-ChildItem -Path $c -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $mb = [math]::Round($total / 1MB)
+    Log "Cache dos navegadores limpo: aproximadamente $mb MB (senhas e favoritos preservados)." Green
+    Adicionar-Achado 'Limpeza' "Cache de navegadores limpo: cerca de $mb MB liberados." 'ok'
+}
+
+# ============================================================
+#  INICIALIZACAO: ATIVAR / DESATIVAR APPS
+# ============================================================
+function Obter-ItensInicializacao {
+    $fontes = @(
+        @{ Run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; Aprov = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'; Rot = 'Usuário' },
+        @{ Run = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'; Aprov = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'; Rot = 'Sistema' },
+        @{ Run = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'; Aprov = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'; Rot = 'Sistema (32 bits)' }
+    )
+    $internos = @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider')
+    $lista = New-Object System.Collections.ArrayList
+    foreach ($f in $fontes) {
+        if (-not (Test-Path $f.Run)) { continue }
+        $itens = Get-ItemProperty -Path $f.Run
+        $aprov = $null
+        if (Test-Path $f.Aprov) { $aprov = Get-ItemProperty -Path $f.Aprov }
+        foreach ($p in $itens.PSObject.Properties) {
+            if ($internos -contains $p.Name) { continue }
+            $desativado = $false
+            if ($aprov) {
+                $ap = $aprov.PSObject.Properties[$p.Name]
+                if ($ap -and ($ap.Value -is [byte[]]) -and $ap.Value.Length -gt 0) { $desativado = (($ap.Value[0] -band 1) -eq 1) }
+            }
+            [void]$lista.Add([pscustomobject]@{ Nome = $p.Name; Aprov = $f.Aprov; Rot = $f.Rot; Desativado = $desativado })
+        }
+    }
+    return $lista
+}
+
+function Gerenciar-Inicializacao {
+    Log '--- Apps de inicialização: ativar ou desativar ---' Cyan
+    $itensReg = @(Obter-ItensInicializacao)
+    if ($itensReg.Count -eq 0) { Log 'Nenhum app de inicialização encontrado no registro.' Yellow; return }
+    $lista = @()
+    for ($i = 0; $i -lt $itensReg.Count; $i++) {
+        $lista += [pscustomobject]@{ Id = [string]$i; Rotulo = ("[{0}] {1}" -f $itensReg[$i].Rot, $itensReg[$i].Nome); Marcado = [bool]$itensReg[$i].Desativado }
+    }
+    $r = Mostrar-ListaMarcavel 'Apps de inicialização' "Marque os apps que deseja DESATIVAR na inicialização do Windows.`nDesmarque para reativar. Nada é apagado: você pode reverter quando quiser." $lista 'APLICAR'
+    if ($null -eq $r) { Log 'Cancelado.' Yellow; return }
+    $alt = 0
+    for ($i = 0; $i -lt $itensReg.Count; $i++) {
+        $marcado = [bool]$r[[string]$i]
+        if ($marcado -ne [bool]$itensReg[$i].Desativado) {
+            $it = $itensReg[$i]
+            try {
+                if (-not (Test-Path $it.Aprov)) { New-Item -Path $it.Aprov -Force | Out-Null }
+                if ($marcado) { $bytes = [byte[]](3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) } else { $bytes = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }
+                Set-ItemProperty -Path $it.Aprov -Name $it.Nome -Value $bytes -Type Binary -ErrorAction Stop
+                if ($marcado) { Log "Desativado na inicialização: $($it.Nome)" Green } else { Log "Reativado na inicialização: $($it.Nome)" Green }
+                $alt++
+            } catch { Log "Não foi possível alterar $($it.Nome): $($_.Exception.Message)" Yellow }
+        }
+    }
+    if ($alt -eq 0) { Log 'Nenhuma alteração.' Gray }
+    else { Adicionar-Achado 'Inicialização' "$alt app(s) de inicialização ativados ou desativados." 'ok' }
+}
+
+# ============================================================
+#  CAIXA DE SELECAO (usada na manutencao e na inicializacao)
+# ============================================================
+function Mostrar-ListaMarcavel {
+    param([string]$Titulo, [string]$Aviso, $Itens, [string]$TextoOk = 'APLICAR')
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = $Titulo
+    $dlg.Size = New-Object System.Drawing.Size(580, 620)
+    $dlg.StartPosition = 'CenterScreen'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.BackColor = (ParaCor $script:Paleta.Fundo)
+    $dlg.ForeColor = (ParaCor $script:Paleta.Texto)
+    $dlg.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = $Aviso
+    $lbl.AutoSize = $false
+    $lbl.Location = New-Object System.Drawing.Point(20, 16)
+    $lbl.Size = New-Object System.Drawing.Size(530, 46)
+    $lbl.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $dlg.Controls.Add($lbl)
+
+    $script:DlgLista = New-Object System.Windows.Forms.CheckedListBox
+    $script:DlgLista.Location = New-Object System.Drawing.Point(20, 68)
+    $script:DlgLista.Size = New-Object System.Drawing.Size(530, 410)
+    $script:DlgLista.CheckOnClick = $true
+    $script:DlgLista.BackColor = (ParaCor $script:Paleta.Painel)
+    $script:DlgLista.ForeColor = (ParaCor $script:Paleta.Texto)
+    $script:DlgLista.BorderStyle = 'FixedSingle'
+    $script:DlgLista.HorizontalScrollbar = $true
+    $script:DlgLista.Font = (Fonte 'Segoe UI' 10 'Regular')
+    for ($i = 0; $i -lt $Itens.Count; $i++) {
+        $idx = $script:DlgLista.Items.Add([string]$Itens[$i].Rotulo)
+        $script:DlgLista.SetItemChecked($idx, [bool]$Itens[$i].Marcado)
+    }
+    $dlg.Controls.Add($script:DlgLista)
+
+    $btnTodos = Novo-BotaoPequeno 'MARCAR TUDO' {
+        for ($k = 0; $k -lt $script:DlgLista.Items.Count; $k++) { $script:DlgLista.SetItemChecked($k, $true) }
+    } $script:Paleta.Cian 130 34
+    $btnTodos.Location = New-Object System.Drawing.Point(20, 490)
+    $dlg.Controls.Add($btnTodos)
+
+    $btnNenhum = Novo-BotaoPequeno 'DESMARCAR' {
+        for ($k = 0; $k -lt $script:DlgLista.Items.Count; $k++) { $script:DlgLista.SetItemChecked($k, $false) }
+    } $script:Paleta.Cian 130 34
+    $btnNenhum.Location = New-Object System.Drawing.Point(160, 490)
+    $dlg.Controls.Add($btnNenhum)
+
+    $ok = Novo-BotaoPequeno $TextoOk { } $script:Paleta.Neon 130 36
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $ok.Location = New-Object System.Drawing.Point(290, 536)
+    $dlg.Controls.Add($ok)
+
+    $cancelar = Novo-BotaoPequeno 'CANCELAR' { } $script:Paleta.Rosa 130 36
+    $cancelar.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $cancelar.Location = New-Object System.Drawing.Point(430, 536)
+    $dlg.Controls.Add($cancelar)
+    $dlg.AcceptButton = $ok
+    $dlg.CancelButton = $cancelar
+
+    $mapa = $null
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $mapa = @{}
+        for ($i = 0; $i -lt $Itens.Count; $i++) { $mapa[[string]$Itens[$i].Id] = $script:DlgLista.GetItemChecked($i) }
+    }
+    $dlg.Dispose()
+    return $mapa
+}
+
+# ============================================================
+#  MANUTENCAO RECOMENDADA (com escolha das etapas)
+# ============================================================
+function Obter-Etapas {
+    $nb = Tem-Bateria
+    $lista = @()
+    $lista += [pscustomobject]@{ Id = 'restauracao'; Rotulo = 'Criar ponto de restauração'; Marcado = $true; Acao = { Criar-PontoRestauracao } }
+    $lista += [pscustomobject]@{ Id = 'temporarios'; Rotulo = 'Limpar arquivos temporários'; Marcado = $true; Acao = { Limpar-Temporarios -SemConfirmar } }
+    $lista += [pscustomobject]@{ Id = 'limpezaprofunda'; Rotulo = 'Limpeza profunda do Windows (você escolhe o que apagar)'; Marcado = $false; Acao = { Limpeza-Profunda } }
+    $lista += [pscustomobject]@{ Id = 'navegadores'; Rotulo = 'Limpar cache dos navegadores (fecha os navegadores)'; Marcado = $true; Acao = { Limpar-Navegadores } }
+    $lista += [pscustomobject]@{ Id = 'energia'; Rotulo = 'Ativar o plano Alto desempenho (aumenta o consumo)'; Marcado = (-not $nb); Acao = { Ajustar-Energia } }
+    $lista += [pscustomobject]@{ Id = 'energiamax'; Rotulo = 'Ativar o plano Desempenho máximo (maior consumo e calor)'; Marcado = $false; Acao = { Ativar-DesempenhoMaximo } }
+    $lista += [pscustomobject]@{ Id = 'modojogo'; Rotulo = 'Ativar o Modo Jogo do Windows'; Marcado = $true; Acao = { Ajustar-ModoJogo } }
+    $lista += [pscustomobject]@{ Id = 'nucleos'; Rotulo = 'Liberar todos os núcleos e desativar o core parking'; Marcado = $true; Acao = { Liberar-Nucleos } }
+    $lista += [pscustomobject]@{ Id = 'rede'; Rotulo = 'Limpar o DNS e testar a rede'; Marcado = $true; Acao = { Otimizar-Rede } }
+    $lista += [pscustomobject]@{ Id = 'saude'; Rotulo = 'Verificar a saúde dos discos'; Marcado = $true; Acao = { Saude-Disco } }
+    $lista += [pscustomobject]@{ Id = 'verificar'; Rotulo = 'Verificar erros do sistema de arquivos'; Marcado = $true; Acao = { Verificar-Disco } }
+    $lista += [pscustomobject]@{ Id = 'otimizar'; Rotulo = 'Otimizar discos (TRIM em SSD, desfragmentar HDD)'; Marcado = $true; Acao = { Otimizar-Disco } }
+    $lista += [pscustomobject]@{ Id = 'hardware'; Rotulo = 'Diagnóstico do hardware, tempo ligado e reinício pendente'; Marcado = $true; Acao = { Diagnostico-PC; Diagnostico-Sistema } }
+    $lista += [pscustomobject]@{ Id = 'eventos'; Rotulo = 'Analisar erros do Windows (últimos 7 dias)'; Marcado = $true; Acao = { Diagnostico-Eventos } }
+    $lista += [pscustomobject]@{ Id = 'drivers'; Rotulo = 'Verificar os drivers de vídeo'; Marcado = $true; Acao = { Verificar-Drivers $false } }
+    $lista += [pscustomobject]@{ Id = 'dispositivos'; Rotulo = 'Procurar dispositivos com problema de driver'; Marcado = $true; Acao = { Verificar-DispositivosProblema } }
+    $lista += [pscustomobject]@{ Id = 'atualizardrivers'; Rotulo = 'Procurar e instalar atualizações de drivers (você escolhe quais)'; Marcado = $false; Acao = { Atualizar-Drivers } }
+    $lista += [pscustomobject]@{ Id = 'seguranca'; Rotulo = 'Verificar antivírus e atualizações'; Marcado = $true; Acao = { Diagnostico-Seguranca } }
+    if ($nb) {
+        $lista += [pscustomobject]@{ Id = 'bateria'; Rotulo = 'Verificar a saúde da bateria'; Marcado = $true; Acao = { Saude-Bateria $false } }
+    }
+    return $lista
+}
+
+function Executar-Tudo {
+    $etapas = @(Obter-Etapas)
+    $itens = @($etapas | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Rotulo = $_.Rotulo; Marcado = $_.Marcado } })
+    $escolha = Mostrar-ListaMarcavel 'Manutenção recomendada' "Revise o que será feito neste PC e desmarque o que não desejar.`nCada ajuste que altera o sistema tem backup e pode ser desfeito." $itens 'EXECUTAR'
+    if ($null -eq $escolha) { Log 'Manutenção cancelada.' Yellow; return }
+    $selecionadas = @($etapas | Where-Object { $escolha[[string]$_.Id] })
+    if ($selecionadas.Count -eq 0) { Log 'Nenhuma etapa selecionada.' Yellow; return }
+
+    $script:Achados.Clear()
+    $script:Etapas.Clear()
+    $antes = Snapshot
+    $total = $selecionadas.Count
+    $n = 0
+    foreach ($et in $selecionadas) {
+        $n++
+        Passo $n $total $et.Rotulo
+        try { & $et.Acao; Registrar-Etapa $et.Rotulo 'Concluída' }
+        catch { Log "Falha em '$($et.Rotulo)': $($_.Exception.Message)" Yellow; Registrar-Etapa $et.Rotulo 'Falhou' }
+    }
+    foreach ($et in $etapas) {
+        if (-not $escolha[[string]$et.Id]) { Registrar-Etapa $et.Rotulo 'Não selecionada' }
+    }
+    $depois = Snapshot
+    $script:UltimoAntes = $antes
+    $script:UltimoDepois = $depois
+    Mostrar-Relatorio $antes $depois
+    Definir-Progresso 100
+    Log 'Manutenção finalizada. Recomenda-se reiniciar o PC.' Green
+    Relatorio-HTML-Agora
+}
+
+# ============================================================
+#  RELATORIO HTML
+# ============================================================
+function HtmlEnc {
+    param($Texto)
+    return [System.Net.WebUtility]::HtmlEncode([string]$Texto)
+}
+
+function Montar-HTML {
+    param($D)
+    $css = @'
+body{font-family:"Segoe UI",Arial,sans-serif;margin:0;background:#f3f6fa;color:#1b2430}
+.topo{background:#08172A;color:#fff;padding:24px 40px;border-bottom:4px solid #00E6A0;display:flex;justify-content:space-between;align-items:center;gap:24px}
+.topo h1{margin:0;font-size:26px;font-weight:600}
+.topo p{margin:6px 0 0;color:#91A8C2;font-size:14px}
+.topo img{max-height:72px;max-width:220px;background:#fff;padding:6px;border-radius:6px}
+.obs{background:#fff;border:1px solid #d5deea;padding:12px 16px;white-space:pre-wrap;font-size:14px;line-height:1.6}
+.wrap{max-width:980px;margin:24px auto;padding:0 20px}
+h2{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:#0b5c9e;border-bottom:1px solid #d5deea;padding-bottom:6px;margin:30px 0 12px}
+.cards{display:flex;gap:12px;flex-wrap:wrap}
+.card{flex:1;min-width:150px;background:#fff;border:1px solid #d5deea;border-radius:8px;padding:14px 16px}
+.card b{display:block;font-size:24px}
+.card span{font-size:12px;color:#5b6b7e}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d5deea;font-size:14px}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #e6edf5;vertical-align:top}
+th{background:#eef3f9;font-size:12px;text-transform:uppercase;color:#5b6b7e}
+.b{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}
+.ok{background:#d9f7ec;color:#0a7a52}.aviso{background:#fff0cf;color:#9a6200}.erro{background:#ffe0e5;color:#b3243e}.info{background:#e1effc;color:#165a99}
+ul{background:#fff;border:1px solid #d5deea;margin:0;padding:12px 12px 12px 32px;font-size:14px;line-height:1.6}
+.assin{margin-top:40px;display:flex;gap:40px}
+.assin div{flex:1;border-top:1px solid #8a99ab;padding-top:6px;font-size:12px;color:#5b6b7e}
+.rod{margin:36px 0 20px;color:#5b6b7e;font-size:12px;text-align:center}
+@media print{body{background:#fff}.topo{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+'@
+    $rotulos = @{ ok = 'OK'; aviso = 'Atenção'; erro = 'Problema'; info = 'Info' }
+    $ordem = @{ erro = 0; aviso = 1; ok = 2; info = 3 }
+    $achados = @($D.Achados)
+    $nOk = @($achados | Where-Object { $_.Nivel -eq 'ok' }).Count
+    $nAv = @($achados | Where-Object { $_.Nivel -eq 'aviso' }).Count
+    $nEr = @($achados | Where-Object { $_.Nivel -eq 'erro' }).Count
+    if ($nEr -gt 0) { $situacao = 'Requer atenção'; $cls = 'erro' }
+    elseif ($nAv -gt 0) { $situacao = 'Bom, com observações'; $cls = 'aviso' }
+    else { $situacao = 'Tudo certo'; $cls = 'ok' }
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine('<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relatório de otimização e manutenção</title><style>')
+    [void]$sb.AppendLine($css)
+    [void]$sb.AppendLine('</style></head><body>')
+    $partesEmp = @()
+    if ($D.Empresa) { $partesEmp += (HtmlEnc $D.Empresa) }
+    if ($D.ContatoEmpresa) { $partesEmp += (HtmlEnc $D.ContatoEmpresa) }
+    $linhaEmpresa = ''
+    if ($partesEmp.Count -gt 0) { $linhaEmpresa = '<p>' + ($partesEmp -join ' &middot; ') + '</p>' }
+    $logoHtml = ''
+    if ($D.LogoUri) { $logoHtml = '<img alt="Logo" src="' + $D.LogoUri + '">' }
+    [void]$sb.AppendLine('<div class="topo"><div><h1>Relatório de otimização e manutenção</h1><p>' + (HtmlEnc $D.Data) + ' &middot; ' + (HtmlEnc $D.Computador) + '</p>' + $linhaEmpresa + '</div>' + $logoHtml + '</div><div class="wrap">')
+
+    [void]$sb.AppendLine('<h2>Resumo</h2><div class="cards">')
+    [void]$sb.AppendLine('<div class="card"><span>Situação geral</span><b><span class="b ' + $cls + '">' + (HtmlEnc $situacao) + '</span></b></div>')
+    [void]$sb.AppendLine('<div class="card"><span>Itens OK</span><b>' + $nOk + '</b></div>')
+    [void]$sb.AppendLine('<div class="card"><span>Pontos de atenção</span><b>' + $nAv + '</b></div>')
+    [void]$sb.AppendLine('<div class="card"><span>Problemas</span><b>' + $nEr + '</b></div></div>')
+
+    [void]$sb.AppendLine('<h2>Dados do atendimento</h2><table>')
+    [void]$sb.AppendLine('<tr><th>Computador</th><td>' + (HtmlEnc $D.Computador) + '</td><th>Usuário</th><td>' + (HtmlEnc $D.Usuario) + '</td></tr>')
+    [void]$sb.AppendLine('<tr><th>Windows</th><td>' + (HtmlEnc $D.Windows) + '</td><th>Plano de energia</th><td>' + (HtmlEnc $D.Plano) + '</td></tr>')
+    if ($D.Cliente -or $D.Equipamento) {
+        [void]$sb.AppendLine('<tr><th>Cliente</th><td>' + (HtmlEnc $D.Cliente) + '</td><th>Equipamento</th><td>' + (HtmlEnc $D.Equipamento) + '</td></tr>')
+    }
+    if ($D.Tecnico) {
+        [void]$sb.AppendLine('<tr><th>Técnico responsável</th><td colspan="3">' + (HtmlEnc $D.Tecnico) + '</td></tr>')
+    }
+    [void]$sb.AppendLine('</table>')
+
+    [void]$sb.AppendLine('<h2>Hardware</h2><table>')
+    [void]$sb.AppendLine('<tr><th>Processador</th><td>' + (HtmlEnc $D.Cpu) + '</td></tr>')
+    [void]$sb.AppendLine('<tr><th>Memória RAM</th><td>' + (HtmlEnc $D.Ram) + '</td></tr>')
+    foreach ($g in @($D.Gpus)) { [void]$sb.AppendLine('<tr><th>Placa de vídeo</th><td>' + (HtmlEnc $g) + '</td></tr>') }
+    foreach ($dk in @($D.Discos)) { [void]$sb.AppendLine('<tr><th>Disco</th><td>' + (HtmlEnc $dk) + '</td></tr>') }
+    [void]$sb.AppendLine('</table>')
+
+    if ($null -ne $D.Antes -and $null -ne $D.Depois) {
+        [void]$sb.AppendLine('<h2>Antes e depois</h2><table><tr><th>Indicador</th><th>Antes</th><th>Depois</th><th>Variação</th></tr>')
+        $dl = [math]::Round($D.Depois.LivreGB - $D.Antes.LivreGB, 1)
+        [void]$sb.AppendLine('<tr><td>Espaço livre no sistema (GB)</td><td>' + $D.Antes.LivreGB + '</td><td>' + $D.Depois.LivreGB + '</td><td>' + $dl + '</td></tr>')
+        [void]$sb.AppendLine('<tr><td>RAM em uso (%)</td><td>' + $D.Antes.RamPct + '</td><td>' + $D.Depois.RamPct + '</td><td>' + ($D.Depois.RamPct - $D.Antes.RamPct) + '</td></tr>')
+        [void]$sb.AppendLine('<tr><td>Processos em execução</td><td>' + $D.Antes.Processos + '</td><td>' + $D.Depois.Processos + '</td><td>' + ($D.Depois.Processos - $D.Antes.Processos) + '</td></tr>')
+        if ($null -ne $D.Antes.Latencia -and $null -ne $D.Depois.Latencia) {
+            [void]$sb.AppendLine('<tr><td>Latência para 1.1.1.1 (ms)</td><td>' + $D.Antes.Latencia + '</td><td>' + $D.Depois.Latencia + '</td><td>' + ($D.Depois.Latencia - $D.Antes.Latencia) + '</td></tr>')
+        }
+        [void]$sb.AppendLine('</table>')
+    }
+
+    $etapas = @($D.Etapas)
+    if ($etapas.Count -gt 0) {
+        [void]$sb.AppendLine('<h2>Etapas da manutenção</h2><table><tr><th>Etapa</th><th>Situação</th></tr>')
+        foreach ($e in $etapas) {
+            $c = 'info'
+            if ($e.Status -eq 'Concluída') { $c = 'ok' } elseif ($e.Status -eq 'Falhou') { $c = 'erro' }
+            [void]$sb.AppendLine('<tr><td>' + (HtmlEnc $e.Rotulo) + '</td><td><span class="b ' + $c + '">' + (HtmlEnc $e.Status) + '</span></td></tr>')
+        }
+        [void]$sb.AppendLine('</table>')
+    }
+
+    [void]$sb.AppendLine('<h2>Diagnóstico</h2>')
+    if ($achados.Count -gt 0) {
+        [void]$sb.AppendLine('<table><tr><th>Área</th><th>Resultado</th><th>Nível</th></tr>')
+        foreach ($a in @($achados | Sort-Object { $ordem[$_.Nivel] })) {
+            $rot = $rotulos[$a.Nivel]
+            if (-not $rot) { $rot = $a.Nivel }
+            [void]$sb.AppendLine('<tr><td>' + (HtmlEnc $a.Area) + '</td><td>' + (HtmlEnc $a.Texto) + '</td><td><span class="b ' + $a.Nivel + '">' + (HtmlEnc $rot) + '</span></td></tr>')
+        }
+        [void]$sb.AppendLine('</table>')
+    } else {
+        [void]$sb.AppendLine('<p>Nenhum diagnóstico foi executado nesta sessão.</p>')
+    }
+
+    [void]$sb.AppendLine('<h2>Pontos de atenção e recomendações</h2>')
+    $atencao = @($achados | Where-Object { $_.Nivel -eq 'erro' -or $_.Nivel -eq 'aviso' } | Sort-Object { $ordem[$_.Nivel] })
+    if ($atencao.Count -gt 0) {
+        [void]$sb.AppendLine('<ul>')
+        foreach ($a in $atencao) { [void]$sb.AppendLine('<li>' + (HtmlEnc $a.Texto) + '</li>') }
+        [void]$sb.AppendLine('</ul>')
+    } else {
+        [void]$sb.AppendLine('<p>Nenhum ponto de atenção identificado.</p>')
+    }
+
+    if ($D.Observacoes) {
+        [void]$sb.AppendLine('<h2>Observações do técnico</h2><div class="obs">' + (HtmlEnc $D.Observacoes) + '</div>')
+    }
+    [void]$sb.AppendLine('<h2>Ajustes aplicados</h2>')
+    $ajustes = @($D.Ajustes)
+    if ($ajustes.Count -gt 0) {
+        [void]$sb.AppendLine('<ul>')
+        foreach ($aj in $ajustes) { [void]$sb.AppendLine('<li>' + (HtmlEnc $aj) + '</li>') }
+        [void]$sb.AppendLine('</ul>')
+    } else {
+        [void]$sb.AppendLine('<p>Nenhum ajuste de configuração registrado.</p>')
+    }
+
+    [void]$sb.AppendLine('<div class="assin"><div>Técnico responsável<br><b>' + (HtmlEnc $D.Tecnico) + '</b></div><div>Cliente<br><b>' + (HtmlEnc $D.Cliente) + '</b></div></div>')
+    [void]$sb.AppendLine('<div class="rod">Gerado pelo Otimizador Gamer ' + (HtmlEnc $D.Versao) + '</div></div></body></html>')
+    return $sb.ToString()
+}
+
+function Gerar-RelatorioHTML {
+    param([string]$Destino)
+    $d = @{}
+    $d.Data = Get-Date -Format 'dd/MM/yyyy HH:mm'
+    $d.Computador = $env:COMPUTERNAME
+    $d.Usuario = $env:USERNAME
+    $d.Versao = 'v3.3'
+    $d.Empresa = [string]$script:Atendimento.Empresa
+    $d.Tecnico = [string]$script:Atendimento.Tecnico
+    $d.ContatoEmpresa = [string]$script:Atendimento.ContatoEmpresa
+    $d.Cliente = [string]$script:Atendimento.Cliente
+    $d.Equipamento = [string]$script:Atendimento.Equipamento
+    $d.Observacoes = [string]$script:Atendimento.Observacoes
+    $d.LogoUri = ''
+    $logoB64 = [string]$script:Atendimento.LogoBase64
+    if ($logoB64 -and ($logoB64 -match '^[A-Za-z0-9+/=]+$')) { $d.LogoUri = 'data:image/png;base64,' + $logoB64 }
+    $d.Windows = ''; $d.Cpu = ''; $d.Ram = ''; $d.Gpus = @(); $d.Discos = @()
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        $d.Windows = "$($os.Caption) (build $($os.BuildNumber))"
+        $d.Cpu = [string]$cpu.Name
+        $d.Ram = ("{0:N1} GB" -f ($ram.Sum / 1GB))
+        $d.Gpus = @(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name })
+        $d.Discos = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "{0} | {1} | saúde: {2}" -f $_.FriendlyName, $_.MediaType, $_.HealthStatus })
+    } catch { }
+    $d.Plano = Nome-PlanoEnergia
+    $d.Antes = $script:UltimoAntes
+    $d.Depois = $script:UltimoDepois
+    $d.Etapas = @($script:Etapas)
+    $d.Achados = @($script:Achados)
+    $aj = @()
+    if (Test-Path $script:BackupFile) {
+        try {
+            $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $b.PSObject.Properties) { $aj += (Descrever-Ajuste $p.Name $p.Value) }
+        } catch { }
+    }
+    $d.Ajustes = $aj
+    $html = Montar-HTML $d
+    Set-Content -Path $Destino -Value $html -Encoding UTF8
+    return $Destino
+}
+
+function Relatorio-HTML-Agora {
+    if ([string]::IsNullOrWhiteSpace($script:Atendimento.Cliente)) {
+        if (Confirmar ("Deseja informar o nome do cliente, o técnico e observações antes de gerar o relatório?" + [Environment]::NewLine + [Environment]::NewLine + "Essas informações aparecem no relatório.")) { Editar-DadosAtendimento }
+    }
+
+    $pastaDestino = [Environment]::GetFolderPath('Desktop')
+    if ([string]::IsNullOrWhiteSpace($pastaDestino) -or -not (Test-Path -LiteralPath $pastaDestino)) {
+        $pastaDestino = [Environment]::GetFolderPath('MyDocuments')
+    }
+    $arq = Join-Path $pastaDestino ("Relatorio_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+
+    try {
+        [void](Gerar-RelatorioHTML $arq)
+        if (-not (Test-Path -LiteralPath $arq -PathType Leaf)) {
+            throw "O arquivo HTML não foi encontrado após a geração."
+        }
+        Log "Relatório HTML salvo em: $arq" Green
+
+        $abriu = $false
+        try {
+            Start-Process -FilePath $arq -ErrorAction Stop
+            $abriu = $true
+        } catch {
+            Log "O Windows não abriu o HTML pelo aplicativo padrão. Tentando navegador alternativo..." Yellow
+        }
+
+        if (-not $abriu) {
+            $pf86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+            $navegadores = @(
+                (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $pf86 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $pf86 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $env:ProgramFiles 'Mozilla Firefox\firefox.exe'),
+                (Join-Path $pf86 'Mozilla Firefox\firefox.exe')
+            )
+            $navegador = $navegadores | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+            if ($navegador) {
+                try {
+                    Start-Process -FilePath $navegador -ArgumentList @('"' + $arq + '"') -ErrorAction Stop
+                    $abriu = $true
+                } catch {
+                    Log "Não foi possível iniciar o navegador encontrado: $($_.Exception.Message)" Yellow
+                }
+            }
+        }
+
+        if (-not $abriu) {
+            try { Start-Process -FilePath 'explorer.exe' -ArgumentList @('"' + $pastaDestino + '"') -ErrorAction Stop } catch { }
+            [System.Windows.Forms.MessageBox]::Show(
+                ("O relatório foi gerado, mas o Windows não conseguiu abrir um navegador automaticamente." + [Environment]::NewLine + [Environment]::NewLine + "Arquivo salvo em:" + [Environment]::NewLine + $arq + [Environment]::NewLine + [Environment]::NewLine + "Abra esse arquivo manualmente com Edge, Chrome ou Firefox."),
+                'HS-Tech - Relatório gerado',
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+        }
+    } catch {
+        Log "Falha ao gerar o relatório HTML: $($_.Exception.Message)" Red
+        [System.Windows.Forms.MessageBox]::Show(
+            ("Não foi possível gerar o relatório HTML." + [Environment]::NewLine + [Environment]::NewLine + "Detalhes: " + $_.Exception.Message),
+            'HS-Tech - Erro no relatório',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+}
+
+# ============================================================
+#  TESTE DE ESTABILIDADE, HISTORICO E CONFIGURACOES
+# ============================================================
+function Add-Hist {
+    param($Cpu, $GpuUso, $TempCpu, $TempGpu)
+    $vals = @($Cpu, $GpuUso, $TempCpu, $TempGpu)
+    for ($i = 0; $i -lt 4; $i++) {
+        $v = -1.0
+        if ($null -ne $vals[$i]) { $v = [double]$vals[$i] }
+        [void]$script:Hist[$i].Add($v)
+        if ($script:Hist[$i].Count -gt 120) { $script:Hist[$i].RemoveAt(0) }
+    }
+    [void]$script:HistHoras.Add((Get-Date -Format 'HH:mm:ss'))
+    if ($script:HistHoras.Count -gt 120) { $script:HistHoras.RemoveAt(0) }
+    if ($null -ne $script:Grafico -and $script:Paginas['monitor'].Visible) { $script:Grafico.Invalidate() }
+}
+
+function Desenhar-Grafico {
+    param($G, $Painel)
+    $G.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $G.Clear((ParaCor $script:Paleta.Painel))
+    $w = $Painel.ClientSize.Width
+    $h = $Painel.ClientSize.Height
+    $penGrade = New-Object System.Drawing.Pen((ParaCor $script:Paleta.Borda), 1)
+    foreach ($f in @(0.25, 0.5, 0.75)) {
+        $yy = [single]($h * $f)
+        $G.DrawLine($penGrade, [single]0, $yy, [single]$w, $yy)
+    }
+    $penGrade.Dispose()
+    $cores = @($script:Paleta.Neon, $script:Paleta.Rosa, $script:Paleta.Amarelo, $script:Paleta.Cian)
+    $nomes = @('CPU %', 'GPU %', 'Temp CPU', 'Temp GPU')
+    $passo = [double]$w / 119.0
+    for ($s = 0; $s -lt 4; $s++) {
+        $dados = $script:Hist[$s]
+        $n = $dados.Count
+        $pts = New-Object System.Collections.ArrayList
+        for ($i = 0; $i -lt $n; $i++) {
+            if ($dados[$i] -ge 0) {
+                $x = [single]($w - (($n - 1 - $i) * $passo))
+                $v = [math]::Min(100.0, $dados[$i])
+                $y = [single]($h - ($v / 100.0 * ($h - 4)) - 2)
+                [void]$pts.Add((New-Object System.Drawing.PointF($x, $y)))
+            }
+        }
+        if ($pts.Count -ge 2) {
+            $pen = New-Object System.Drawing.Pen((ParaCor $cores[$s]), 2)
+            $G.DrawLines($pen, [System.Drawing.PointF[]]$pts.ToArray([System.Drawing.PointF]))
+            $pen.Dispose()
+        }
+    }
+    $fonte = Fonte 'Segoe UI' 8.5 'Regular'
+    for ($s = 0; $s -lt 4; $s++) {
+        $br = New-Object System.Drawing.SolidBrush((ParaCor $cores[$s]))
+        $G.DrawString($nomes[$s], $fonte, $br, [single](12 + $s * 92), [single]6)
+        $br.Dispose()
+    }
+    $fonte.Dispose()
+}
+
+function Exportar-Historico {
+    if ($script:HistHoras.Count -eq 0) { Log 'Ainda não há dados no histórico.' Yellow; return }
+    $nomes = @('CPU', 'GPU', 'Temp CPU', 'Temp GPU')
+    for ($s = 0; $s -lt 4; $s++) {
+        $validos = @($script:Hist[$s] | Where-Object { $_ -ge 0 })
+        if ($validos.Count -gt 0) {
+            $m = $validos | Measure-Object -Average -Maximum
+            Log ("{0}: média {1} | pico {2}" -f $nomes[$s], [math]::Round($m.Average), [math]::Round($m.Maximum))
+        }
+    }
+    $arq = Join-Path $script:Pasta ("historico_{0}.csv" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $linhas = @('hora;cpu_pct;gpu_pct;temp_cpu;temp_gpu')
+    for ($i = 0; $i -lt $script:HistHoras.Count; $i++) {
+        $cols = @($script:HistHoras[$i])
+        for ($s = 0; $s -lt 4; $s++) {
+            $x = $script:Hist[$s][$i]
+            if ($x -lt 0) { $cols += '' } else { $cols += [string]$x }
+        }
+        $linhas += ($cols -join ';')
+    }
+    $linhas | Set-Content -Path $arq -Encoding UTF8
+    Log "Histórico exportado: $arq" Green
+}
+
+function Exportar-Config {
+    $dlg = New-Object System.Windows.Forms.SaveFileDialog
+    $dlg.Filter = 'Configurações (*.json)|*.json'
+    $dlg.FileName = 'otimizador_config.json'
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { Log 'Cancelado.' Yellow; return }
+    $obj = @{ Jogos = @($script:Jogos); Cfg = $script:Cfg; Empresa = @{ Empresa = $script:Atendimento.Empresa; Tecnico = $script:Atendimento.Tecnico; ContatoEmpresa = $script:Atendimento.ContatoEmpresa; LogoBase64 = $script:Atendimento.LogoBase64 } }
+    $obj | ConvertTo-Json -Depth 4 | Set-Content -Path $dlg.FileName -Encoding UTF8
+    Log "Configurações exportadas: $($dlg.FileName)" Green
+}
+
+function Importar-Config {
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Filter = 'Configurações (*.json)|*.json'
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { Log 'Cancelado.' Yellow; return }
+    try {
+        $dados = Get-Content $dlg.FileName -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -eq $dados.Jogos -or $null -eq $dados.Cfg) { throw 'Arquivo de configuração inválido.' }
+        $script:Jogos = @($dados.Jogos | ForEach-Object { [string]$_ })
+        $script:ListaJogos.Items.Clear()
+        foreach ($j in $script:Jogos) { [void]$script:ListaJogos.Items.Add($j) }
+        $script:NumCpu.Value = [math]::Max(40, [math]::Min(120, [int]$dados.Cfg.CpuMax))
+        $script:NumGpu.Value = [math]::Max(40, [math]::Min(120, [int]$dados.Cfg.GpuMax))
+        $script:NumDisco.Value = [math]::Max(40, [math]::Min(120, [int]$dados.Cfg.DiscoMax))
+        $script:ChkAlertas.Checked = [bool]$dados.Cfg.Alertas
+        $script:ChkAuto.Checked = [bool]$dados.Cfg.Auto
+        Salvar-Jogos
+        Salvar-Config
+        if ($null -ne $dados.Empresa) {
+            foreach ($kE in @('Empresa', 'Tecnico', 'ContatoEmpresa', 'LogoBase64')) {
+                if ($null -ne $dados.Empresa.$kE) { $script:Atendimento[$kE] = [string]$dados.Empresa.$kE }
+            }
+            Salvar-Atendimento
+        }
+        Log 'Configurações importadas.' Green
+    } catch {
+        Log "Não foi possível importar: $($_.Exception.Message)" Red
+    }
+}
+
+# ============================================================
+#  DRIVERS: DIAGNOSTICO, BACKUP E ATUALIZACAO
+# ============================================================
+$script:BackupDriversOk = $false
+
+function Perguntar-BackupDrivers {
+    param([int]$Quantidade)
+    $texto = "Serão instalados $Quantidade driver(s).`n`n" +
+             "Antes disso, será criado um ponto de restauração.`n" +
+             "Deseja também salvar um backup dos drivers atuais? (recomendado)`n`n" +
+             "Sim = fazer backup e instalar`nNão = apenas instalar`nCancelar = voltar"
+    return [string][System.Windows.Forms.MessageBox]::Show($texto, 'Atualizar drivers', 'YesNoCancel', 'Question')
+}
+
+function Verificar-DispositivosProblema {
+    Log '--- Dispositivos com problema de driver ---' Cyan
+    $prob = @()
+    try {
+        $prob = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.Status -in @('Error', 'Degraded', 'Unknown') })
+    } catch {
+        Log "Não foi possível consultar os dispositivos: $($_.Exception.Message)" Yellow
+        return
+    }
+    if ($prob.Count -eq 0) {
+        Log 'Nenhum dispositivo com problema.' Green
+        Adicionar-Achado 'Drivers' 'Nenhum dispositivo com problema de driver.' 'ok'
+        return
+    }
+    $nomes = @()
+    foreach ($d in $prob) {
+        $nome = [string]$d.FriendlyName
+        if (-not $nome) { $nome = "Dispositivo desconhecido ($($d.Class))" }
+        $nomes += $nome
+        Log ("   {0} [{1}] - situação: {2}" -f $nome, $d.Class, $d.Status) Yellow
+    }
+    $resumo = ($nomes | Select-Object -First 5) -join ', '
+    Log "$($prob.Count) dispositivo(s) com problema. Use 'Procurar atualizações de drivers' para tentar corrigir." Yellow
+    Adicionar-Achado 'Drivers' ("{0} dispositivo(s) com problema de driver: {1}." -f $prob.Count, $resumo) 'aviso'
+}
+
+function Inventario-Drivers {
+    Log '--- Inventário e idade dos drivers (pode levar alguns segundos) ---' Cyan
+    $bloco = {
+        param($x)
+        Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceName -and $_.DriverDate } | ForEach-Object {
+            [pscustomobject]@{ Nome = [string]$_.DeviceName; Classe = [string]$_.DeviceClass; Fabricante = [string]$_.Manufacturer; Versao = [string]$_.DriverVersion; Data = [datetime]$_.DriverDate }
+        }
+    }
+    $todos = @(Rodar-EmJob $bloco @(0))
+    if ($todos.Count -eq 0) { Log 'Não foi possível listar os drivers instalados.' Yellow; return }
+    $relevantes = @('DISPLAY', 'NET', 'MEDIA', 'BLUETOOTH', 'HDC', 'SCSIADAPTER', 'SYSTEM', 'BIOMETRIC')
+    $limite = (Get-Date).AddYears(-3)
+    $velhos = @($todos | Where-Object { ($relevantes -contains ([string]$_.Classe).ToUpper()) -and $_.Fabricante -ne 'Microsoft' -and $_.Data -lt $limite } | Sort-Object Data)
+    Log ("{0} drivers instalados; {1} de componentes principais com mais de 3 anos." -f $todos.Count, $velhos.Count)
+    foreach ($v in @($velhos | Select-Object -First 12)) {
+        Log ("   {0} ({1}) - versão {2} de {3}" -f $v.Nome, $v.Fabricante, $v.Versao, $v.Data.ToString('dd/MM/yyyy'))
+    }
+    if ($velhos.Count -gt 0) {
+        $ex = (@($velhos | Select-Object -First 3) | ForEach-Object { $_.Nome }) -join ', '
+        Adicionar-Achado 'Drivers' ("{0} drivers de componentes principais têm mais de 3 anos (ex.: {1}). Driver antigo nem sempre é problema: atualize se houver falhas ou se o fabricante tiver versão nova." -f $velhos.Count, $ex) 'aviso'
+    } else {
+        Adicionar-Achado 'Drivers' 'Nenhum driver de componente principal com mais de 3 anos.' 'ok'
+    }
+}
+
+function Backup-Drivers {
+    param([string]$PastaBase = '')
+    $script:BackupDriversOk = $false
+    Log '--- Backup dos drivers instalados ---' Cyan
+    if (-not $PastaBase) {
+        $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dlg.Description = 'Escolha onde salvar o backup dos drivers (pode ocupar vários GB).'
+        $dlg.SelectedPath = [Environment]::GetFolderPath('Desktop')
+        if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { Log 'Backup cancelado.' Yellow; return }
+        $PastaBase = $dlg.SelectedPath
+    }
+    $destino = Join-Path $PastaBase ("Backup_Drivers_{0}" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+    try {
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        Log 'Exportando os drivers de terceiros instalados (pode levar alguns minutos)...'
+        [void](Rodar-EmJob { param($d) Export-WindowsDriver -Online -Destination $d | Out-Null } @($destino))
+        $qt = @(Get-ChildItem -Path $destino -Directory -ErrorAction SilentlyContinue).Count
+        if ($qt -gt 0) {
+            $script:BackupDriversOk = $true
+            Log "Backup concluído: $qt pacotes de driver em $destino" Green
+            Adicionar-Achado 'Drivers' "Backup de $qt pacotes de driver salvo em $destino." 'ok'
+        } else {
+            Log 'Nenhum driver de terceiros foi exportado (o backup ficou vazio).' Yellow
+        }
+    } catch {
+        Log "Falha no backup dos drivers: $($_.Exception.Message)" Red
+    }
+}
+
+function Atualizar-Drivers {
+    Log '--- Atualização de drivers (Windows Update) ---' Cyan
+    Log 'Procurando drivers disponíveis no Windows Update (pode levar alguns minutos)...'
+    $busca = @(Rodar-EmJob {
+        param($x)
+        try {
+            $sessao = New-Object -ComObject Microsoft.Update.Session
+            $res = $sessao.CreateUpdateSearcher().Search("IsInstalled=0 and Type='Driver' and IsHidden=0")
+            foreach ($u in $res.Updates) {
+                $data = ''
+                if ($u.DriverVerDate) { $data = ([datetime]$u.DriverVerDate).ToString('dd/MM/yyyy') }
+                [pscustomobject]@{
+                    Id = [string]$u.Identity.UpdateID; Titulo = [string]$u.Title; Fabricante = [string]$u.DriverManufacturer
+                    Classe = [string]$u.DriverClass; Data = $data; TamanhoMB = [math]::Round($u.MaxDownloadSize / 1MB, 1)
+                }
+            }
+        } catch { [pscustomobject]@{ Erro = $_.Exception.Message } }
+    } @(0))
+
+    $falha = @($busca | Where-Object { $_.Erro })
+    if ($falha.Count -gt 0) {
+        Log "Não foi possível consultar o Windows Update: $($falha[0].Erro)" Red
+        Adicionar-Achado 'Drivers' 'Não foi possível consultar o Windows Update (verifique a internet e o serviço de atualização).' 'aviso'
+        return
+    }
+    $encontrados = @($busca | Where-Object { $_.Id })
+    if ($encontrados.Count -eq 0) {
+        Log 'Nenhum driver pendente no Windows Update.' Green
+        Adicionar-Achado 'Drivers' 'Nenhum driver pendente no Windows Update.' 'ok'
+        return
+    }
+    Log "$($encontrados.Count) driver(s) disponível(is)."
+
+    $itens = @()
+    foreach ($u in $encontrados) {
+        $obs = ''
+        $marcado = $true
+        if ($u.Classe -eq 'Display') { $marcado = $false; $obs = ' [vídeo: prefira o site do fabricante]' }
+        if ($u.Classe -match 'Firmware' -or $u.Titulo -match 'Firmware|BIOS') { $marcado = $false; $obs = ' [firmware: só com o carregador ligado]' }
+        $classe = $u.Classe
+        if (-not $classe) { $classe = 'Driver' }
+        $itens += [pscustomobject]@{ Id = [string]$u.Id; Rotulo = ("[{0}] {1}{2}" -f $classe, $u.Titulo, $obs); Marcado = $marcado }
+    }
+    $escolha = Mostrar-ListaMarcavel 'Drivers disponíveis' "Os drivers marcados serão baixados e instalados.`nDrivers de vídeo e firmware vêm desmarcados por segurança." $itens 'INSTALAR'
+    if ($null -eq $escolha) { Log 'Cancelado.' Yellow; return }
+    $selecionados = @($itens | Where-Object { $escolha[[string]$_.Id] })
+    if ($selecionados.Count -eq 0) { Log 'Nenhum driver selecionado.' Yellow; return }
+
+    $resp = Perguntar-BackupDrivers $selecionados.Count
+    if ($resp -eq 'Cancel') { Log 'Cancelado.' Yellow; return }
+    Criar-PontoRestauracao
+    if ($resp -eq 'Yes') {
+        Backup-Drivers
+        if (-not $script:BackupDriversOk) {
+            if (-not (Confirmar 'O backup dos drivers não foi concluído. Deseja instalar mesmo assim?')) { Log 'Instalação cancelada.' Yellow; return }
+        }
+    }
+
+    $ids = @($selecionados | ForEach-Object { [string]$_.Id })
+    Log "Baixando e instalando $($ids.Count) driver(s). Isso pode demorar; não desligue o PC."
+    $res = @(Rodar-EmJob {
+        param($ids)
+        try {
+            $sessao = New-Object -ComObject Microsoft.Update.Session
+            $busca = $sessao.CreateUpdateSearcher().Search("IsInstalled=0 and Type='Driver' and IsHidden=0")
+            $col = New-Object -ComObject Microsoft.Update.UpdateColl
+            $titulos = @()
+            foreach ($u in $busca.Updates) {
+                if ($ids -contains [string]$u.Identity.UpdateID) {
+                    if (-not $u.EulaAccepted) { $u.AcceptEula() }
+                    [void]$col.Add($u)
+                    $titulos += [string]$u.Title
+                }
+            }
+            if ($col.Count -eq 0) { return [pscustomobject]@{ Erro = 'Os drivers selecionados não estão mais disponíveis.' } }
+            $dl = $sessao.CreateUpdateDownloader()
+            $dl.Updates = $col
+            [void]$dl.Download()
+            $inst = $sessao.CreateUpdateInstaller()
+            $inst.Updates = $col
+            $r = $inst.Install()
+            for ($i = 0; $i -lt $col.Count; $i++) {
+                [pscustomobject]@{ Titulo = $titulos[$i]; Codigo = [int]$r.GetUpdateResult($i).ResultCode; Reiniciar = [bool]$r.RebootRequired }
+            }
+        } catch { [pscustomobject]@{ Erro = $_.Exception.Message } }
+    } @(, $ids))
+
+    $erroInst = @($res | Where-Object { $_.Erro })
+    if ($erroInst.Count -gt 0) {
+        Log "Falha na instalação: $($erroInst[0].Erro)" Red
+        Adicionar-Achado 'Drivers' "Falha ao instalar drivers: $($erroInst[0].Erro)" 'erro'
+        return
+    }
+    $ok = 0; $falhas = 0; $reiniciar = $false
+    foreach ($r in @($res | Where-Object { $_.Titulo })) {
+        if ($r.Codigo -eq 2 -or $r.Codigo -eq 3) { $ok++; Log "Instalado: $($r.Titulo)" Green }
+        else { $falhas++; Log "Falhou: $($r.Titulo)" Yellow }
+        if ($r.Reiniciar) { $reiniciar = $true }
+    }
+    Log "Drivers instalados: $ok | com falha: $falhas" Green
+    if ($ok -gt 0) { Adicionar-Achado 'Drivers' "$ok driver(s) instalado(s) pelo Windows Update." 'ok' }
+    if ($falhas -gt 0) { Adicionar-Achado 'Drivers' "$falhas driver(s) não puderam ser instalados." 'aviso' }
+    if ($reiniciar) {
+        Log 'Reinicie o PC para concluir a instalação dos drivers.' Yellow
+        Adicionar-Achado 'Drivers' 'Reinicie o PC para concluir a instalação dos drivers.' 'aviso'
+    }
+}
+
+function Abrir-DriversFabricante {
+    Log '--- Drivers do fabricante do PC ---' Cyan
+    try {
+        $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        $bb = Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue | Select-Object -First 1
+        $fab = [string]$cs.Manufacturer
+        $mod = [string]$cs.Model
+        if ((-not $fab) -or $fab -match 'System manufacturer|To be filled|O\.E\.M\.|Default string') {
+            if ($bb) { $fab = [string]$bb.Manufacturer; $mod = [string]$bb.Product }
+        }
+        Log "Equipamento detectado: $fab $mod" Green
+        $consulta = [System.Uri]::EscapeDataString(("{0} {1} drivers" -f $fab, $mod))
+        if (Confirmar "Abrir uma pesquisa pelos drivers oficiais de '$fab $mod'?`n`nBaixe somente do site do fabricante.") {
+            Start-Process ('https://www.google.com/search?q=' + $consulta)
+        }
+    } catch {
+        Log "Não foi possível identificar o equipamento: $($_.Exception.Message)" Yellow
+    }
+}
+
+function Assistente-Drivers {
+    Log '=== Assistente de drivers ===' Cyan
+    Passo 1 3 'Dispositivos com problema'
+    Verificar-DispositivosProblema
+    Passo 2 3 'Idade dos drivers instalados'
+    Inventario-Drivers
+    Passo 3 3 'Atualizações disponíveis no Windows Update'
+    Atualizar-Drivers
+    Log 'Assistente concluído. Para placa de vídeo, use também o site do fabricante (aba Drivers).' Green
+}
+
+# ============================================================
+#  DADOS DO ATENDIMENTO (empresa, tecnico, logo e cliente)
+# ============================================================
+$script:AtendimentoFile = Join-Path $script:Pasta 'atendimento.json'
+$script:Atendimento = @{ Empresa = ''; Tecnico = ''; ContatoEmpresa = ''; LogoBase64 = ''; Cliente = ''; Equipamento = ''; Observacoes = '' }
+if (Test-Path $script:AtendimentoFile) {
+    try {
+        $lidoAtend = Get-Content $script:AtendimentoFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($kAtend in @('Empresa', 'Tecnico', 'ContatoEmpresa', 'LogoBase64')) {
+            if ($null -ne $lidoAtend.$kAtend) { $script:Atendimento[$kAtend] = [string]$lidoAtend.$kAtend }
+        }
+    } catch { }
+}
+$script:LogoTemp = ''
+
+function Salvar-Atendimento {
+    $o = @{
+        Empresa = $script:Atendimento.Empresa; Tecnico = $script:Atendimento.Tecnico
+        ContatoEmpresa = $script:Atendimento.ContatoEmpresa; LogoBase64 = $script:Atendimento.LogoBase64
+    }
+    $o | ConvertTo-Json | Set-Content -Path $script:AtendimentoFile -Encoding UTF8
+}
+
+function Carregar-Logo {
+    # Reduz a imagem (altura maxima 120 px) e devolve em Base64 (PNG) para embutir no relatorio
+    param([string]$Caminho)
+    $img = [System.Drawing.Image]::FromFile($Caminho)
+    try {
+        $esc = [math]::Min(1.0, 120.0 / $img.Height)
+        $w = [int][math]::Max(1, [math]::Round($img.Width * $esc))
+        $h = [int][math]::Max(1, [math]::Round($img.Height * $esc))
+        $bmp = New-Object System.Drawing.Bitmap($w, $h)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.DrawImage($img, 0, 0, $w, $h)
+        $g.Dispose()
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $b64 = [Convert]::ToBase64String($ms.ToArray())
+        $ms.Dispose()
+        $bmp.Dispose()
+        return $b64
+    } finally {
+        $img.Dispose()
+    }
+}
+
+function Novo-CampoDialogo {
+    param($Form, [string]$Rotulo, [int]$Y, [string]$Valor, [int]$Altura = 26, [bool]$Multilinha = $false)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Rotulo
+    $l.AutoSize = $true
+    $l.Font = (Fonte 'Segoe UI' 9 'Regular')
+    $l.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $l.Location = New-Object System.Drawing.Point(20, $Y)
+    $Form.Controls.Add($l)
+    $t = New-Object System.Windows.Forms.TextBox
+    $t.Location = New-Object System.Drawing.Point(20, ($Y + 20))
+    $t.Width = 540
+    $t.Text = $Valor
+    $t.Font = (Fonte 'Segoe UI' 10 'Regular')
+    $t.BackColor = (ParaCor $script:Paleta.Painel)
+    $t.ForeColor = (ParaCor $script:Paleta.Texto)
+    $t.BorderStyle = 'FixedSingle'
+    if ($Multilinha) {
+        $t.Multiline = $true
+        $t.Height = $Altura
+        $t.ScrollBars = 'Vertical'
+    }
+    $Form.Controls.Add($t)
+    return $t
+}
+
+function Editar-DadosAtendimento {
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = 'Dados do atendimento'
+    $dlg.Size = New-Object System.Drawing.Size(600, 700)
+    $dlg.StartPosition = 'CenterScreen'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.BackColor = (ParaCor $script:Paleta.Fundo)
+    $dlg.ForeColor = (ParaCor $script:Paleta.Texto)
+    $dlg.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+
+    $s1 = New-Object System.Windows.Forms.Label
+    $s1.Text = 'EMPRESA (fica salva neste PC e entra no relatório)'
+    $s1.AutoSize = $true
+    $s1.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $s1.ForeColor = (ParaCor $script:Paleta.Cian)
+    $s1.Location = New-Object System.Drawing.Point(20, 14)
+    $dlg.Controls.Add($s1)
+
+    $script:TxtEmpresa = Novo-CampoDialogo $dlg 'Empresa' 38 $script:Atendimento.Empresa
+    $script:TxtTecnico = Novo-CampoDialogo $dlg 'Técnico responsável' 100 $script:Atendimento.Tecnico
+    $script:TxtContato = Novo-CampoDialogo $dlg 'Contato da empresa (telefone ou e-mail)' 162 $script:Atendimento.ContatoEmpresa
+
+    $lblL = New-Object System.Windows.Forms.Label
+    $lblL.Text = 'Logo da empresa (PNG ou JPG)'
+    $lblL.AutoSize = $true
+    $lblL.Font = (Fonte 'Segoe UI' 9 'Regular')
+    $lblL.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $lblL.Location = New-Object System.Drawing.Point(20, 224)
+    $dlg.Controls.Add($lblL)
+
+    $script:LogoTemp = [string]$script:Atendimento.LogoBase64
+    $script:LblLogo = New-Object System.Windows.Forms.Label
+    $script:LblLogo.AutoSize = $true
+    $script:LblLogo.Font = (Fonte 'Segoe UI' 9 'Regular')
+    $script:LblLogo.ForeColor = (ParaCor $script:Paleta.Texto)
+    $script:LblLogo.Location = New-Object System.Drawing.Point(300, 256)
+    if ($script:LogoTemp) { $script:LblLogo.Text = 'Logo carregada.' } else { $script:LblLogo.Text = 'Nenhuma logo selecionada.' }
+    $dlg.Controls.Add($script:LblLogo)
+
+    $btnLogo = Novo-BotaoPequeno 'ESCOLHER IMAGEM' {
+        $ofd = New-Object System.Windows.Forms.OpenFileDialog
+        $ofd.Filter = 'Imagens (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp'
+        if ($ofd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            try {
+                $script:LogoTemp = Carregar-Logo $ofd.FileName
+                $script:LblLogo.Text = 'Logo carregada.'
+            } catch {
+                $script:LblLogo.Text = 'Não foi possível abrir a imagem.'
+            }
+        }
+    } $script:Paleta.Cian 150 32
+    $btnLogo.Location = New-Object System.Drawing.Point(20, 248)
+    $dlg.Controls.Add($btnLogo)
+
+    $btnSemLogo = Novo-BotaoPequeno 'REMOVER' {
+        $script:LogoTemp = ''
+        $script:LblLogo.Text = 'Nenhuma logo selecionada.'
+    } $script:Paleta.Rosa 110 32
+    $btnSemLogo.Location = New-Object System.Drawing.Point(180, 248)
+    $dlg.Controls.Add($btnSemLogo)
+
+    $s2 = New-Object System.Windows.Forms.Label
+    $s2.Text = 'CLIENTE (vale só para este atendimento)'
+    $s2.AutoSize = $true
+    $s2.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $s2.ForeColor = (ParaCor $script:Paleta.Cian)
+    $s2.Location = New-Object System.Drawing.Point(20, 304)
+    $dlg.Controls.Add($s2)
+
+    $script:TxtCliente = Novo-CampoDialogo $dlg 'Nome do cliente' 328 $script:Atendimento.Cliente
+    $script:TxtEquip = Novo-CampoDialogo $dlg 'Equipamento (marca e modelo)' 390 $script:Atendimento.Equipamento
+    $script:TxtObs = Novo-CampoDialogo $dlg 'Observações do técnico (aparecem no relatório)' 452 $script:Atendimento.Observacoes 100 $true
+
+    $ok = Novo-BotaoPequeno 'SALVAR' { } $script:Paleta.Neon 130 36
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $ok.Location = New-Object System.Drawing.Point(290, 612)
+    $dlg.Controls.Add($ok)
+    $cancelar = Novo-BotaoPequeno 'CANCELAR' { } $script:Paleta.Rosa 130 36
+    $cancelar.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $cancelar.Location = New-Object System.Drawing.Point(430, 612)
+    $dlg.Controls.Add($cancelar)
+    $dlg.AcceptButton = $ok
+    $dlg.CancelButton = $cancelar
+
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $script:Atendimento.Empresa = $script:TxtEmpresa.Text.Trim()
+        $script:Atendimento.Tecnico = $script:TxtTecnico.Text.Trim()
+        $script:Atendimento.ContatoEmpresa = $script:TxtContato.Text.Trim()
+        $script:Atendimento.LogoBase64 = [string]$script:LogoTemp
+        $script:Atendimento.Cliente = $script:TxtCliente.Text.Trim()
+        $script:Atendimento.Equipamento = $script:TxtEquip.Text.Trim()
+        $script:Atendimento.Observacoes = $script:TxtObs.Text.Trim()
+        Salvar-Atendimento
+        Log 'Dados do atendimento salvos (empresa e logo ficam neste PC; cliente só nesta sessão).' Green
+    } else {
+        Log 'Dados do atendimento não alterados.' Gray
+    }
+    $dlg.Dispose()
+}
+
+# ============================================================
+#  LIMPEZA PROFUNDA DO WINDOWS
+# ============================================================
+function Existe-Caminho {
+    param([string]$Caminho)
+    return (Test-Path -LiteralPath $Caminho)
+}
+
+function Livre-Sistema {
+    return [int64](Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))).Free
+}
+
+function Medir-Pasta {
+    param([string]$Caminho)
+    if (-not (Existe-Caminho $Caminho)) { return [int64]0 }
+    $soma = (Get-ChildItem -LiteralPath $Caminho -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+    if ($soma) { return [int64]$soma }
+    return [int64]0
+}
+
+function Tamanho-Arquivo {
+    param([string]$Caminho)
+    if (Existe-Caminho $Caminho) { return [int64](Get-Item -LiteralPath $Caminho -Force -ErrorAction SilentlyContinue).Length }
+    return [int64]0
+}
+
+function Formatar-Tamanho {
+    param([int64]$Bytes)
+    if ($Bytes -ge 1GB) { return ('{0:N1} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N0} MB' -f ($Bytes / 1MB)) }
+    return ('{0:N0} KB' -f ($Bytes / 1KB))
+}
+
+function Esvaziar-Pasta {
+    param([string]$Caminho)
+    if (Existe-Caminho $Caminho) {
+        Get-ChildItem -LiteralPath $Caminho -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Executar-Cleanmgr {
+    # Usa a propria Limpeza de Disco do Windows (modo sagerun) para os itens pedidos
+    param([string[]]$Chaves)
+    $base = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches'
+    $usadas = @()
+    foreach ($c in $Chaves) {
+        $k = $base + '\' + $c
+        if (Test-Path -LiteralPath $k) {
+            Set-ItemProperty -LiteralPath $k -Name 'StateFlags0098' -Value 2 -Type DWord
+            $usadas += $k
+        }
+    }
+    if ($usadas.Count -eq 0) { return $false }
+    try { [void](Rodar-Processo 'cleanmgr.exe' '/sagerun:98') }
+    finally { foreach ($k in $usadas) { Remove-ItemProperty -LiteralPath $k -Name 'StateFlags0098' -ErrorAction SilentlyContinue } }
+    return $true
+}
+
+function Limpeza-Profunda {
+    Log '--- Limpeza profunda do Windows ---' Cyan
+    $sistema = $env:SystemRoot
+    $unidade = $env:SystemDrive
+    $pWU = Join-Path $sistema 'SoftwareDistribution\Download'
+    $pEntrega = Join-Path $sistema 'ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache'
+    $pWer1 = Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'
+    $pWer2 = Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue'
+    $pMini = Join-Path $sistema 'Minidump'
+    $pMem = Join-Path $sistema 'MEMORY.DMP'
+    $pOld = $unidade + '\Windows.old'
+    $pLix = $unidade + '\$Recycle.Bin'
+
+    Log 'Calculando o espaço que pode ser liberado (pode levar alguns segundos)...'
+    $tWU = Medir-Pasta $pWU
+    $tEntrega = Medir-Pasta $pEntrega
+    $tWer = (Medir-Pasta $pWer1) + (Medir-Pasta $pWer2)
+    $tDump = (Medir-Pasta $pMini) + (Tamanho-Arquivo $pMem)
+    $temOld = Existe-Caminho $pOld
+    $tOld = [int64]0
+    if ($temOld) { $tOld = Medir-Pasta $pOld }
+    $tLix = Medir-Pasta $pLix
+
+    $itens = @()
+    $itens += [pscustomobject]@{ Id = 'wu'; Rotulo = ("Cache de atualizações do Windows Update ({0})" -f (Formatar-Tamanho $tWU)); Marcado = $true }
+    $itens += [pscustomobject]@{ Id = 'componentes'; Rotulo = 'Limpeza do repositório de componentes do Windows (DISM; o tamanho varia)'; Marcado = $true }
+    $itens += [pscustomobject]@{ Id = 'entrega'; Rotulo = ("Cache de otimização de entrega ({0})" -f (Formatar-Tamanho $tEntrega)); Marcado = $true }
+    $itens += [pscustomobject]@{ Id = 'wer'; Rotulo = ("Relatórios de erro do Windows ({0})" -f (Formatar-Tamanho $tWer)); Marcado = $true }
+    $itens += [pscustomobject]@{ Id = 'dumps'; Rotulo = ("Despejos de memória e minidumps ({0}) - úteis para diagnosticar telas azuis" -f (Formatar-Tamanho $tDump)); Marcado = $false }
+    if ($temOld) {
+        $itens += [pscustomobject]@{ Id = 'windowsold'; Rotulo = ("Instalação anterior do Windows - Windows.old ({0}) - impede voltar à versão anterior" -f (Formatar-Tamanho $tOld)); Marcado = $false }
+    }
+    $itens += [pscustomobject]@{ Id = 'lixeira'; Rotulo = ("Esvaziar a Lixeira ({0})" -f (Formatar-Tamanho $tLix)); Marcado = $false }
+
+    $escolha = Mostrar-ListaMarcavel 'Limpeza profunda do Windows' "Marque o que deseja limpar. Os tamanhos são estimativas.`nItens que podem ser úteis depois (dumps, Windows.old, Lixeira) vêm desmarcados." $itens 'LIMPAR'
+    if ($null -eq $escolha) { Log 'Cancelado.' Yellow; return }
+    $sel = @($itens | Where-Object { $escolha[[string]$_.Id] })
+    if ($sel.Count -eq 0) { Log 'Nada selecionado.' Yellow; return }
+    if (@($sel | Where-Object { $_.Id -eq 'windowsold' }).Count -gt 0) {
+        if (-not (Confirmar "Remover a instalação anterior do Windows impede voltar à versão antiga do sistema.`n`nTem certeza?")) {
+            $sel = @($sel | Where-Object { $_.Id -ne 'windowsold' })
+            Log 'Windows.old mantido.' Yellow
+        }
+    }
+    if ($sel.Count -eq 0) { Log 'Nada a fazer.' Yellow; return }
+
+    $livreAntes = Livre-Sistema
+    $n = 0
+    $total = $sel.Count
+    foreach ($it in $sel) {
+        $n++
+        Passo $n $total $it.Rotulo
+        try {
+            switch ($it.Id) {
+                'wu' {
+                    $rodando = @(@('bits', 'wuauserv') | Where-Object { (Get-Service -Name $_ -ErrorAction SilentlyContinue).Status -eq 'Running' })
+                    Stop-Service -Name wuauserv, bits -Force -ErrorAction SilentlyContinue
+                    Esvaziar-Pasta $pWU
+                    foreach ($sv in $rodando) { Start-Service -Name $sv -ErrorAction SilentlyContinue }
+                    Log 'Cache do Windows Update limpo.' Green
+                }
+                'componentes' {
+                    Log 'Limpando o repositório de componentes (pode levar vários minutos)...'
+                    $r = Rodar-Processo 'dism.exe' '/Online /Cleanup-Image /StartComponentCleanup'
+                    if ($r.Codigo -eq 0) { Log 'Repositório de componentes limpo.' Green }
+                    else { Log ("O DISM terminou com o código {0}." -f $r.Codigo) Yellow }
+                }
+                'entrega' {
+                    try { Delete-DeliveryOptimizationCache -Force -ErrorAction Stop } catch { Esvaziar-Pasta $pEntrega }
+                    Log 'Cache de otimização de entrega limpo.' Green
+                }
+                'wer' {
+                    Esvaziar-Pasta $pWer1
+                    Esvaziar-Pasta $pWer2
+                    Log 'Relatórios de erro do Windows limpos.' Green
+                }
+                'dumps' {
+                    Esvaziar-Pasta $pMini
+                    if (Existe-Caminho $pMem) { Remove-Item -LiteralPath $pMem -Force -ErrorAction SilentlyContinue }
+                    Log 'Despejos de memória removidos.' Green
+                }
+                'windowsold' {
+                    if (Executar-Cleanmgr @('Previous Installations')) { Log 'Windows.old removido pela Limpeza de Disco do Windows.' Green }
+                    else { Log 'A Limpeza de Disco do Windows não oferece a remoção da instalação anterior neste PC.' Yellow }
+                }
+                'lixeira' {
+                    try { Clear-RecycleBin -Force -ErrorAction Stop; Log 'Lixeira esvaziada.' Green }
+                    catch { Log 'A Lixeira já estava vazia ou não pôde ser esvaziada.' Gray }
+                }
+            }
+        } catch {
+            Log "Falha em '$($it.Rotulo)': $($_.Exception.Message)" Yellow
+        }
+    }
+    $livreDepois = Livre-Sistema
+    $liberado = $livreDepois - $livreAntes
+    if ($liberado -lt 0) { $liberado = 0 }
+    $txt = Formatar-Tamanho ([int64]$liberado)
+    Log "Limpeza profunda concluída: aproximadamente $txt liberados." Green
+    Adicionar-Achado 'Limpeza' "Limpeza profunda do Windows: cerca de $txt liberados." 'ok'
+}
+
+# ============================================================
+#  FINALIZAR ATENDIMENTO (relatorio final + remocao da ferramenta)
+# ============================================================
+function Descrever-Ajuste {
+    param([string]$Nome, $Valor)
+    if ($Nome -eq 'PlanoEnergia') { return "Plano de energia: alterado (plano original: $Valor)" }
+    if ($Nome -eq 'DNSAlterado') { return 'DNS: servidor alterado pela ferramenta' }
+    if ($Nome -like 'DNSOriginal|*') {
+        $srv = (@($Valor.ServerAddresses) -join ', ')
+        if (-not $srv) { $srv = 'automático (DHCP)' }
+        return "DNS do adaptador '$($Valor.InterfaceAlias)': alterado (original: $srv)"
+    }
+    if ($Nome -like '*|*') {
+        $partes = $Nome -split '\|', 2
+        $orig = "$Valor"
+        if ($orig -eq '__AUSENTE__') { $orig = 'não existia' }
+        $rotulo = $partes[1]
+        switch -Wildcard ($Nome) {
+            '*GameBar*'           { $rotulo = 'Modo Jogo do Windows' }
+            '*GameDVR_Enabled'    { $rotulo = 'Captura em segundo plano (Game DVR) desativada' }
+            '*AppCaptureEnabled'  { $rotulo = 'Captura de jogos (Game DVR) desativada' }
+            '*HwSchMode'          { $rotulo = 'Agendamento de GPU acelerado por hardware (HAGS)' }
+            '*VisualFXSetting'    { $rotulo = 'Efeitos visuais ajustados para desempenho' }
+            '*EnableTransparency' { $rotulo = 'Transparência do Windows desativada' }
+            '*ActiveHours*'       { $rotulo = 'Horário ativo do Windows Update' }
+        }
+        return "Registro - ${rotulo}: $($partes[0])\$($partes[1]) (valor original: $orig)"
+    }
+    return $Nome
+}
+
+function Montar-RelatorioFinal {
+    $l = @()
+    $l += 'RELATÓRIO FINAL DE OTIMIZAÇÃO E MANUTENÇÃO'
+    $l += '============================================='
+    $l += ("Data: {0}" -f (Get-Date -Format 'dd/MM/yyyy HH:mm'))
+    $l += "Computador: $env:COMPUTERNAME"
+    $l += "Usuário do Windows: $env:USERNAME"
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        $l += "Windows: $($os.Caption) (build $($os.BuildNumber))"
+        $l += ''
+        $l += 'HARDWARE'
+        $l += "  CPU: $($cpu.Name)"
+        $l += ("  RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB))
+        foreach ($g in @(Get-CimInstance Win32_VideoController)) { $l += "  GPU: $($g.Name)" }
+        foreach ($d in @(Get-PhysicalDisk -ErrorAction SilentlyContinue)) {
+            $l += ("  Disco: {0} | {1} | {2}" -f $d.FriendlyName, $d.MediaType, $d.HealthStatus)
+        }
+    } catch { $l += '  (não foi possível ler todo o hardware)' }
+    $l += ''
+    $l += 'AJUSTES APLICADOS PELA FERRAMENTA'
+    $qt = 0
+    if (Test-Path $script:BackupFile) {
+        try {
+            $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $b.PSObject.Properties) {
+                $l += ('  - ' + (Descrever-Ajuste $p.Name $p.Value))
+                $qt++
+            }
+        } catch { $l += '  (o backup de ajustes não pôde ser lido)' }
+    }
+    if ($qt -eq 0) { $l += '  Nenhum ajuste de configuração registrado.' }
+    $l += ''
+    $l += ('PLANO DE ENERGIA ATUAL: ' + (Nome-PlanoEnergia))
+    $l += ''
+    $l += 'RELATÓRIOS ANTES x DEPOIS'
+    if (Test-Path $script:RelatorioFile) { $l += @(Get-Content $script:RelatorioFile -Encoding UTF8) }
+    else { $l += '  Nenhum relatório antes/depois foi gerado.' }
+    $l += ''
+    $l += 'REGISTRO DE ATIVIDADES (últimas linhas)'
+    foreach ($arq in @(Get-ChildItem -Path $script:Pasta -Filter 'log_*.txt' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $l += "--- $($arq.Name) ---"
+        $l += @(Get-Content $arq.FullName -Tail 250 -Encoding UTF8)
+    }
+    return $l
+}
+
+function Finalizar-Remover {
+    Log '--- Finalizar e remover a ferramenta ---' Cyan
+    $texto = "Esta ação vai:`n`n" +
+             "  - gerar o relatório final na Área de Trabalho;`n" +
+             "  - desligar o Modo Performance e remover as tarefas agendadas;`n" +
+             "  - apagar o programa e todos os seus dados (logs, backup e configurações) deste PC.`n`n" +
+             "Os ajustes já aplicados (energia, DNS, Modo Jogo etc.) continuam valendo, mas o botão Desfazer ajustes deixará de existir.`n`n" +
+             "Deseja continuar?"
+    $r = [System.Windows.Forms.MessageBox]::Show($texto, 'Finalizar e remover', 'YesNo', 'Warning', 'Button2')
+    if ($r -ne 'Yes') { Log 'Cancelado.' Yellow; return }
+
+    if ([string]::IsNullOrWhiteSpace($script:Atendimento.Cliente)) {
+        if (Confirmar "Deseja informar o nome do cliente e observações para o relatório final?") { Editar-DadosAtendimento }
+    }
+
+    # 1) Modo Performance
+    if ($script:ModoJogoAtivo -or $script:PlanoAnterior) {
+        Sair-ModoPerformance
+        $script:ModoJogoAtivo = $false
+    }
+
+    # 2) Tarefas agendadas
+    foreach ($t in @('OtimizadorGamer-Manutencao', 'OtimizadorGamer-Iniciar')) {
+        try {
+            Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction Stop
+            Log "Tarefa agendada removida: $t" Green
+        } catch { }
+    }
+
+    # 3) Relatorio final na Area de Trabalho
+    $destinoRel = Join-Path ([Environment]::GetFolderPath('Desktop')) ("Relatorio_Final_{0}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+    $relatorioOk = $false
+    try {
+        Montar-RelatorioFinal | Set-Content -Path $destinoRel -Encoding UTF8 -ErrorAction Stop
+        $relatorioOk = $true
+        Log "Relatório final salvo: $destinoRel" Green
+    } catch {
+        Log "Não foi possível salvar o relatório final: $($_.Exception.Message)" Red
+        if (-not (Confirmar 'Não foi possível salvar o relatório final. Deseja remover a ferramenta mesmo assim?')) {
+            Log 'Remoção cancelada.' Yellow
+            return
+        }
+    }
+
+    # 4) Remocao do programa e dos dados (feita por um processo separado, depois que esta janela fechar)
+    $exeAlvo = $null
+    if ($script:EhExe) { $exeAlvo = $script:CaminhoScript }
+    elseif ($env:OTIMIZADOR_EXE) { $exeAlvo = $env:OTIMIZADOR_EXE }
+    $pastaPadrao = Join-Path $env:LOCALAPPDATA 'OtimizadorGamer'
+    $cmds = @('ping 127.0.0.1 -n 6 >nul')
+    if ($exeAlvo -and (Test-Path $exeAlvo)) {
+        $cmds += ('del /f /q "{0}"' -f $exeAlvo)
+    }
+    if ($script:Pasta -ieq $pastaPadrao) {
+        $cmds += ('rmdir /s /q "{0}"' -f $script:Pasta)
+    } else {
+        # Pasta escolhida pelo usuario: apaga somente os arquivos criados pela ferramenta
+        foreach ($padrao in @('log_*.txt', 'backup_ajustes.json', 'jogos.json', 'config.json', 'relatorios.txt', 'relatorio_sistema_*.txt')) {
+            $cmds += ('del /f /q "{0}"' -f (Join-Path $script:Pasta $padrao))
+        }
+        if (-not $script:EhExe) { $cmds += ('del /f /q "{0}"' -f $script:CaminhoScript) }
+    }
+    if ($exeAlvo -and (Test-Path $exeAlvo)) {
+        $cmds += 'ping 127.0.0.1 -n 4 >nul'
+        $cmds += ('del /f /q "{0}"' -f $exeAlvo)
+    }
+
+    if ($relatorioOk) {
+        $abriu = $false
+        $destinoHtml = Join-Path ([Environment]::GetFolderPath('Desktop')) ("Relatorio_Final_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+        try {
+            [void](Gerar-RelatorioHTML $destinoHtml)
+            Log "Relatório HTML salvo: $destinoHtml" Green
+            Start-Process $destinoHtml
+            $abriu = $true
+        } catch { }
+        if (-not $abriu) { try { Start-Process notepad.exe -ArgumentList "`"$destinoRel`"" } catch { } }
+    }
+    [void][System.Windows.Forms.MessageBox]::Show("Tudo pronto.`n`nO relatório final foi salvo na Área de Trabalho. O programa será fechado e removido deste PC em instantes.", 'Otimizador Gamer', 'OK', 'Information')
+    # So agora inicia a remocao: o processo separado espera esta janela fechar antes de apagar
+    Start-Process -FilePath 'cmd.exe' -ArgumentList ('/c ' + ($cmds -join ' & ')) -WindowStyle Hidden
+    $script:EncerrarAposAcao = $true
+}
+
+# ============================================================
+#  INTERFACE GRAFICA
+# ============================================================
+$script:ItensLargos = New-Object System.Collections.ArrayList
+
+function Executar-Acao {
+    param([scriptblock]$Bloco)
+    if ($script:Ocupado) { Log 'Aguarde: outra tarefa está em andamento.' Yellow; return }
+    $script:Ocupado = $true
+    $script:Form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    foreach ($b in $script:Botoes) { $b.Enabled = $false }
+    try { & $Bloco }
+    catch { Log "Erro: $($_.Exception.Message)" Red }
+    finally {
+        foreach ($b in $script:Botoes) { $b.Enabled = $true }
+        $script:Form.Cursor = [System.Windows.Forms.Cursors]::Default
+        Definir-Progresso 0
+        $script:Ocupado = $false
+        if ($script:EncerrarAposAcao) { $script:Form.Close() }
+    }
+}
+
+function Ativar-DoubleBuffer {
+    param($Ctl)
+    try {
+        $Ctl.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance,NonPublic').SetValue($Ctl, $true, $null)
+    } catch { }
+}
+
+function Ajustar-Larguras {
+    # Faz secoes, linhas e cartoes acompanharem a largura da janela
+    foreach ($c in $script:ItensLargos) {
+        if ($null -ne $c.Parent) {
+            $largura = $c.Parent.ClientSize.Width - $c.Parent.Padding.Horizontal - 24
+            if ($largura -gt 480) { $c.Width = [int]$largura }
+        }
+    }
+}
+
+function Novo-Label {
+    param([string]$Texto, [double]$Tam = 10, [string]$CorHex = '#EAF4FF', [string]$NomeFonte = 'Segoe UI', [string]$Estilo = 'Regular', [int]$Largura = 780)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Texto
+    $l.AutoSize = $true
+    $l.MaximumSize = New-Object System.Drawing.Size($Largura, 0)
+    $l.Font = (Fonte $NomeFonte $Tam $Estilo)
+    $l.ForeColor = (ParaCor $CorHex)
+    $l.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
+    return $l
+}
+
+# ---------- Tile de acao (titulo + descricao + faixa de cor) ----------
+function Achar-Botao {
+    param($Ctl)
+    $c = $Ctl
+    while ($null -ne $c -and -not ($c.Tag -is [scriptblock])) { $c = $c.Parent }
+    return $c
+}
+
+function Destacar-Botao {
+    param($Ctl, [bool]$Sobre)
+    $b = Achar-Botao $Ctl
+    if ($null -eq $b -or -not $b.Enabled) { return }
+    $inner = $b.Controls[0]
+    if ($Sobre) {
+        $b.BackColor = (ParaCor ([string]$inner.Tag))
+        $inner.BackColor = (ParaCor $script:Paleta.Hover)
+    } else {
+        $b.BackColor = (ParaCor $script:Paleta.Borda)
+        $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    }
+}
+
+function Novo-Botao {
+    param([string]$Texto, [scriptblock]$Acao, [string]$CorHex = '', [int]$L = 272, [int]$A = 78)
+    if (-not $CorHex) { $CorHex = $script:Paleta.Neon }
+    $partes = $Texto -split "`n", 2
+    $titulo = $partes[0]
+    $desc = ''
+    if ($partes.Count -gt 1) { $desc = $partes[1] }
+
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size($L, $A)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 14)
+    $outer.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $outer.Tag = $Acao
+
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $inner.Tag = $CorHex
+    $outer.Controls.Add($inner)
+
+    $faixa = New-Object System.Windows.Forms.Panel
+    $faixa.Dock = 'Left'
+    $faixa.Width = 4
+    $faixa.BackColor = (ParaCor $CorHex)
+    $inner.Controls.Add($faixa)
+
+    $lt = New-Object System.Windows.Forms.Label
+    $lt.Text = $titulo
+    $lt.AutoSize = $false
+    $lt.AutoEllipsis = $true
+    $lt.Location = New-Object System.Drawing.Point(18, 12)
+    $lt.Size = New-Object System.Drawing.Size(($L - 38), 22)
+    $lt.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
+    $lt.ForeColor = (ParaCor $script:Paleta.Texto)
+    $lt.BackColor = [System.Drawing.Color]::Transparent
+    $inner.Controls.Add($lt)
+
+    $ld = New-Object System.Windows.Forms.Label
+    $ld.Text = $desc
+    $ld.AutoSize = $false
+    $ld.Location = New-Object System.Drawing.Point(18, 36)
+    $ld.Size = New-Object System.Drawing.Size(($L - 38), ($A - 44))
+    $ld.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+    $ld.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $ld.BackColor = [System.Drawing.Color]::Transparent
+    $inner.Controls.Add($ld)
+
+    foreach ($c in @($outer, $inner, $faixa, $lt, $ld)) {
+        $c.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $c.Add_Click({ param($s, $e) $b = Achar-Botao $s; if ($null -ne $b) { Executar-Acao $b.Tag } })
+        $c.Add_MouseEnter({ param($s, $e) Destacar-Botao $s $true })
+        $c.Add_MouseLeave({ param($s, $e) Destacar-Botao $s $false })
+    }
+    [void]$script:Botoes.Add($outer)
+    return $outer
+}
+
+function Novo-BotaoPequeno {
+    param([string]$Texto, [scriptblock]$Acao, [string]$CorHex = '', [int]$L = 140, [int]$A = 36)
+    if (-not $CorHex) { $CorHex = $script:Paleta.Neon }
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Texto
+    $b.Size = New-Object System.Drawing.Size($L, $A)
+    $b.FlatStyle = 'Flat'
+    $b.FlatAppearance.BorderColor = (ParaCor $CorHex)
+    $b.FlatAppearance.BorderSize = 1
+    $b.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+    $b.BackColor = (ParaCor $script:Paleta.Painel)
+    $b.ForeColor = (ParaCor $script:Paleta.Texto)
+    $b.Font = (Fonte 'Segoe UI Semibold' 9 'Regular')
+    $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $b.Add_Click($Acao)
+    return $b
+}
+
+# ---------- Cartao de formulario (borda + titulo) ----------
+function Novo-Cartao {
+    param([string]$Titulo, [int]$A = 100, [int]$L = 880)
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size($L, $A)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $outer.Controls.Add($inner)
+    if ($Titulo) {
+        $t = New-Object System.Windows.Forms.Label
+        $t.Text = $Titulo
+        $t.AutoSize = $true
+        $t.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+        $t.ForeColor = (ParaCor $script:Paleta.Cian)
+        $t.Location = New-Object System.Drawing.Point(18, 14)
+        $inner.Controls.Add($t)
+    }
+    [void]$script:ItensLargos.Add($outer)
+    return @{ Outer = $outer; Corpo = $inner }
+}
+
+function Novo-Campo {
+    param($Pai, [string]$Rotulo, [int]$X)
+    $r = New-Object System.Windows.Forms.Label
+    $r.Text = $Rotulo
+    $r.AutoSize = $true
+    $r.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+    $r.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $r.Location = New-Object System.Drawing.Point($X, 40)
+    $Pai.Controls.Add($r)
+    $v = New-Object System.Windows.Forms.Label
+    $v.Text = '--'
+    $v.AutoSize = $false
+    $v.AutoEllipsis = $true
+    $v.Size = New-Object System.Drawing.Size(210, 24)
+    $v.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
+    $v.ForeColor = (ParaCor $script:Paleta.Texto)
+    $v.Location = New-Object System.Drawing.Point($X, 58)
+    $Pai.Controls.Add($v)
+    return $v
+}
+
+# ---------- Card de metrica com barra ----------
+function Novo-Card {
+    param([string]$Titulo, [string]$CorHex)
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size(176, 106)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 12, 0)
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $outer.Controls.Add($inner)
+
+    $t = New-Object System.Windows.Forms.Label
+    $t.Text = $Titulo
+    $t.AutoSize = $true
+    $t.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $t.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $t.Location = New-Object System.Drawing.Point(16, 14)
+    $inner.Controls.Add($t)
+
+    $v = New-Object System.Windows.Forms.Label
+    $v.Text = '--'
+    $v.AutoSize = $true
+    $v.Font = (Fonte 'Segoe UI Semibold' 20 'Regular')
+    $v.ForeColor = (ParaCor $CorHex)
+    $v.Location = New-Object System.Drawing.Point(14, 34)
+    $inner.Controls.Add($v)
+
+    $trilho = New-Object System.Windows.Forms.Panel
+    $trilho.Location = New-Object System.Drawing.Point(16, 84)
+    $trilho.Size = New-Object System.Drawing.Size(142, 5)
+    $trilho.Anchor = 'Top,Left,Right'
+    $trilho.BackColor = (ParaCor $script:Paleta.Trilho)
+    $fill = New-Object System.Windows.Forms.Panel
+    $fill.Dock = 'Left'
+    $fill.Width = 0
+    $fill.BackColor = (ParaCor $CorHex)
+    $trilho.Controls.Add($fill)
+    $inner.Controls.Add($trilho)
+
+    return @{ Painel = $outer; Valor = $v; Barra = $fill; Trilho = $trilho; Cor = $CorHex }
+}
+
+function Nova-Pagina {
+    param([string]$Nome, [string]$Titulo, [string]$Sub)
+    $p = New-Object System.Windows.Forms.FlowLayoutPanel
+    $p.Dock = 'Fill'
+    $p.AutoScroll = $true
+    $p.Padding = New-Object System.Windows.Forms.Padding(30, 24, 18, 18)
+    $p.BackColor = (ParaCor $script:Paleta.Fundo)
+    $p.Visible = $false
+    Ativar-DoubleBuffer $p
+    $t = Novo-Label $Titulo 20 $script:Paleta.Texto 'Segoe UI Semibold' 'Regular'
+    $t.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 2)
+    $p.Controls.Add($t); $p.SetFlowBreak($t, $true)
+    $s = Novo-Label $Sub 9.5 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900
+    $s.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 14)
+    $p.Controls.Add($s); $p.SetFlowBreak($s, $true)
+    $linha = New-Object System.Windows.Forms.Panel
+    $linha.Height = 1; $linha.Width = 880
+    $linha.BackColor = (ParaCor $script:Paleta.Borda)
+    $linha.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 14)
+    $p.Controls.Add($linha); $p.SetFlowBreak($linha, $true)
+    [void]$script:ItensLargos.Add($linha)
+    $script:Paginas[$Nome] = $p
+    $script:Conteudo.Controls.Add($p)
+    return $p
+}
+
+function Nova-Secao {
+    param($Pagina, [string]$Texto)
+    $c = New-Object System.Windows.Forms.Panel
+    $c.Height = 30; $c.Width = 880
+    $c.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 8)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Texto
+    $l.AutoSize = $true
+    $l.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $l.ForeColor = (ParaCor $script:Paleta.Cian)
+    $l.Location = New-Object System.Drawing.Point(0, 7)
+    $c.Controls.Add($l)
+    $ln = New-Object System.Windows.Forms.Panel
+    $ln.Dock = 'Bottom'; $ln.Height = 1
+    $ln.BackColor = (ParaCor $script:Paleta.Borda)
+    $c.Controls.Add($ln)
+    $Pagina.Controls.Add($c); $Pagina.SetFlowBreak($c, $true)
+    [void]$script:ItensLargos.Add($c)
+}
+
+function Mostrar-Pagina {
+    param([string]$Nome)
+    foreach ($k in @($script:Paginas.Keys)) { $script:Paginas[$k].Visible = ($k -eq $Nome) }
+    foreach ($b in $script:NavBotoes) {
+        if ($b.Tag -eq $Nome) {
+            $b.ForeColor = (ParaCor $script:Paleta.Neon)
+            $b.BackColor = (ParaCor $script:Paleta.Hover)
+            $b.Font = $script:FonteNavAtiva
+            $script:NavInd.Top = $b.Top
+            $script:NavInd.Visible = $true
+            $script:NavInd.BringToFront()
+        } else {
+            $b.ForeColor = (ParaCor $script:Paleta.Texto)
+            $b.BackColor = (ParaCor $script:Paleta.Lateral)
+            $b.Font = $script:FonteNav
+        }
+    }
+    Ajustar-Larguras
+}
+
+# ============================================================
+#  JANELA PRINCIPAL
+# ============================================================
+$script:FonteNav = (Fonte 'Segoe UI' 10 'Regular')
+$script:FonteNavAtiva = (Fonte 'Segoe UI Semibold' 10 'Regular')
+
+$script:Form = New-Object System.Windows.Forms.Form
+$script:Form.Text = 'Otimizador Gamer'
+$script:Form.Icon = [System.Drawing.SystemIcons]::Shield
+$areaUtil = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$larguraJanela = [int][math]::Min(1420, $areaUtil.Width - 24)
+$alturaJanela = [int][math]::Min(900, $areaUtil.Height - 24)
+$larguraMin = [int][math]::Min(1180, $larguraJanela)
+$alturaMin = [int][math]::Min(760, $alturaJanela)
+$script:Form.MinimumSize = New-Object System.Drawing.Size($larguraMin, $alturaMin)
+$script:Form.Size = New-Object System.Drawing.Size($larguraJanela, $alturaJanela)
+$script:Form.StartPosition = 'CenterScreen'
+$script:Form.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:Form.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:Form.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+Ativar-DoubleBuffer $script:Form
+
+$script:Conteudo = New-Object System.Windows.Forms.Panel
+$script:Conteudo.Dock = 'Fill'
+$script:Conteudo.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:Form.Controls.Add($script:Conteudo)
+
+# ---------- Barra lateral ----------
+$lateral = New-Object System.Windows.Forms.Panel
+$lateral.Dock = 'Left'
+$lateral.Width = 224
+$lateral.BackColor = (ParaCor $script:Paleta.Lateral)
+$script:Form.Controls.Add($lateral)
+
+$bordaLateral = New-Object System.Windows.Forms.Panel
+$bordaLateral.Dock = 'Right'
+$bordaLateral.Width = 1
+$bordaLateral.BackColor = (ParaCor $script:Paleta.Borda)
+$lateral.Controls.Add($bordaLateral)
+
+# ---------- Rodape: registro de atividades ----------
+$rodape = New-Object System.Windows.Forms.Panel
+$rodape.Dock = 'Bottom'
+$rodape.Height = 36
+$rodape.Tag = 'Recolhido'
+$rodape.BackColor = (ParaCor '#050C16')
+$script:Form.Controls.Add($rodape)
+
+$script:TxtLog = New-Object System.Windows.Forms.RichTextBox
+$script:TxtLog.Dock = 'Fill'
+$script:TxtLog.ReadOnly = $true
+$script:TxtLog.BorderStyle = 'None'
+$script:TxtLog.BackColor = (ParaCor '#050C16')
+$script:TxtLog.ForeColor = (ParaCor '#A9BBD0')
+$script:TxtLog.Font = (Fonte 'Consolas' 9 'Regular')
+$script:TxtLog.Visible = $false
+$rodape.Controls.Add($script:TxtLog)
+
+$barraLog = New-Object System.Windows.Forms.Panel
+$barraLog.Dock = 'Top'
+$barraLog.Height = 30
+$barraLog.BackColor = (ParaCor '#0A1626')
+$lblLog = New-Object System.Windows.Forms.Label
+$lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+$lblLog.Cursor = [System.Windows.Forms.Cursors]::Hand
+$lblLog.AutoSize = $true
+$lblLog.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$lblLog.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblLog.Location = New-Object System.Drawing.Point(20, 8)
+$barraLog.Controls.Add($lblLog)
+$alternarLog = {
+    if ($rodape.Tag -eq 'Recolhido') {
+        $rodape.Height = 170
+        $rodape.Tag = 'Expandido'
+        $script:TxtLog.Visible = $true
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [-]'
+    } else {
+        $rodape.Height = 36
+        $rodape.Tag = 'Recolhido'
+        $script:TxtLog.Visible = $false
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+    }
+}
+$lblLog.Add_Click($alternarLog)
+$barraLog.Add_Click($alternarLog)
+$btnLimparLog = New-Object System.Windows.Forms.Button
+$btnLimparLog.Text = 'LIMPAR'
+$btnLimparLog.Dock = 'Right'
+$btnLimparLog.Width = 90
+$btnLimparLog.FlatStyle = 'Flat'
+$btnLimparLog.FlatAppearance.BorderSize = 0
+$btnLimparLog.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+$btnLimparLog.ForeColor = (ParaCor $script:Paleta.Mudo)
+$btnLimparLog.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$btnLimparLog.Cursor = [System.Windows.Forms.Cursors]::Hand
+$btnLimparLog.Add_Click({ $script:TxtLog.Clear() })
+$barraLog.Controls.Add($btnLimparLog)
+$rodape.Controls.Add($barraLog)
+
+$script:BarraFundo = New-Object System.Windows.Forms.Panel
+$script:BarraFundo.Dock = 'Top'
+$script:BarraFundo.Height = 4
+$script:BarraFundo.BackColor = (ParaCor $script:Paleta.Trilho)
+$script:BarraFill = New-Object System.Windows.Forms.Panel
+$script:BarraFill.Dock = 'Left'
+$script:BarraFill.Width = 0
+$script:BarraFill.BackColor = (ParaCor $script:Paleta.Neon)
+$script:BarraFundo.Controls.Add($script:BarraFill)
+$rodape.Controls.Add($script:BarraFundo)
+
+# ---------- Cabecalho ----------
+$script:Cabecalho = New-Object System.Windows.Forms.Panel
+$script:Cabecalho.Dock = 'Top'
+$script:Cabecalho.Height = 76
+$script:Cabecalho.BackColor = (ParaCor $script:Paleta.Lateral)
+
+$linhaCab = New-Object System.Windows.Forms.Panel
+$linhaCab.Dock = 'Bottom'; $linhaCab.Height = 1
+$linhaCab.BackColor = (ParaCor $script:Paleta.Borda)
+$script:Cabecalho.Controls.Add($linhaCab)
+
+$marca = New-Object System.Windows.Forms.Panel
+$marca.Size = New-Object System.Drawing.Size(6, 38)
+$marca.Location = New-Object System.Drawing.Point(26, 17)
+$marca.BackColor = (ParaCor $script:Paleta.Neon)
+$script:Cabecalho.Controls.Add($marca)
+
+$lblT1 = New-Object System.Windows.Forms.Label
+$lblT1.Text = 'OTIMIZADOR'
+$lblT1.AutoSize = $true
+$lblT1.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+$lblT1.ForeColor = (ParaCor $script:Paleta.Texto)
+$lblT1.Location = New-Object System.Drawing.Point(42, 10)
+$script:Cabecalho.Controls.Add($lblT1)
+
+$lblT2 = New-Object System.Windows.Forms.Label
+$lblT2.Text = 'GAMER'
+$lblT2.AutoSize = $true
+$lblT2.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+$lblT2.ForeColor = (ParaCor $script:Paleta.Neon)
+$lblT2.Location = New-Object System.Drawing.Point((42 + $lblT1.PreferredWidth + 4), 10)
+$script:Cabecalho.Controls.Add($lblT2)
+
+$lblSub = New-Object System.Windows.Forms.Label
+$lblSub.Text = 'Central de desempenho, diagnóstico e manutenção do Windows'
+$lblSub.AutoSize = $true
+$lblSub.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblSub.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblSub.Location = New-Object System.Drawing.Point(44, 44)
+$script:Cabecalho.Controls.Add($lblSub)
+
+$script:ChipAdmin = New-Object System.Windows.Forms.Label
+$script:ChipAdmin.Text = ([string][char]0x25CF) + '  ADMINISTRADOR'
+$script:ChipAdmin.AutoSize = $true
+$script:ChipAdmin.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$script:ChipAdmin.ForeColor = (ParaCor $script:Paleta.Neon)
+$script:ChipAdmin.Location = New-Object System.Drawing.Point(700, 20)
+$script:Cabecalho.Controls.Add($script:ChipAdmin)
+
+$script:ChipVer = New-Object System.Windows.Forms.Label
+$script:ChipVer.Text = 'Versão 3.3'
+$script:ChipVer.AutoSize = $true
+$script:ChipVer.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+$script:ChipVer.ForeColor = (ParaCor $script:Paleta.Mudo)
+$script:ChipVer.Location = New-Object System.Drawing.Point(700, 42)
+$script:Cabecalho.Controls.Add($script:ChipVer)
+
+$script:Cabecalho.Add_Resize({
+    $script:ChipAdmin.Left = $script:Cabecalho.Width - $script:ChipAdmin.Width - 30
+    $script:ChipVer.Left = $script:Cabecalho.Width - $script:ChipVer.Width - 30
+})
+$script:Form.Controls.Add($script:Cabecalho)
+
+# ---------- Navegacao agrupada ----------
+$entradasNav = @(
+    @('G', 'VISÃO GERAL'),
+    @('N', 'inicio', 'Painel'),
+    @('G', 'OTIMIZAÇÃO'),
+    @('N', 'desempenho', 'Desempenho'),
+    @('N', 'disco', 'Disco'),
+    @('N', 'rede', 'Rede'),
+    @('N', 'drivers', 'Drivers'),
+    @('N', 'diag', 'Diagnóstico'),
+    @('G', 'JOGOS'),
+    @('N', 'jogos', 'Perfis por jogo'),
+    @('G', 'FERRAMENTAS'),
+    @('N', 'programas', 'Programas'),
+    @('N', 'monitor', 'Monitor e alertas'),
+    @('G', 'AUTOMAÇÃO'),
+    @('N', 'agenda', 'Agendar e relatórios')
+)
+$y = 14
+foreach ($en in $entradasNav) {
+    if ($en[0] -eq 'G') {
+        if ($y -gt 14) { $y += 6 }
+        $g = New-Object System.Windows.Forms.Label
+        $g.Text = $en[1]
+        $g.AutoSize = $true
+        $g.Font = (Fonte 'Segoe UI Semibold' 7.5 'Regular')
+        $g.ForeColor = (ParaCor $script:Paleta.Mudo)
+        $g.Location = New-Object System.Drawing.Point(26, $y)
+        $lateral.Controls.Add($g)
+        $y += 20
+    } else {
+        $nb = New-Object System.Windows.Forms.Button
+        $nb.Text = $en[2]
+        $nb.Tag = $en[1]
+        $nb.Location = New-Object System.Drawing.Point(0, $y)
+        $nb.Size = New-Object System.Drawing.Size(223, 32)
+        $nb.FlatStyle = 'Flat'
+        $nb.FlatAppearance.BorderSize = 0
+        $nb.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+        $nb.BackColor = (ParaCor $script:Paleta.Lateral)
+        $nb.ForeColor = (ParaCor $script:Paleta.Texto)
+        $nb.Font = $script:FonteNav
+        $nb.TextAlign = 'MiddleLeft'
+        $nb.Padding = New-Object System.Windows.Forms.Padding(26, 0, 0, 0)
+        $nb.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $nb.Add_Click({ param($s, $e) Mostrar-Pagina $s.Tag })
+        $lateral.Controls.Add($nb)
+        [void]$script:NavBotoes.Add($nb)
+        $y += 33
+    }
+}
+$script:NavInd = New-Object System.Windows.Forms.Panel
+$script:NavInd.Size = New-Object System.Drawing.Size(4, 32)
+$script:NavInd.BackColor = (ParaCor $script:Paleta.Neon)
+$script:NavInd.Visible = $false
+$lateral.Controls.Add($script:NavInd)
+
+$lblVersao = New-Object System.Windows.Forms.Label
+$lblVersao.Text = 'HS-Tech  |  Otimizador Gamer v3.4'
+$lblVersao.AutoSize = $false
+$lblVersao.Dock = 'Bottom'
+$lblVersao.Height = 32
+$lblVersao.TextAlign = 'MiddleLeft'
+$lblVersao.Padding = New-Object System.Windows.Forms.Padding(26, 0, 0, 0)
+$lblVersao.Font = (Fonte 'Segoe UI' 8 'Regular')
+$lblVersao.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lateral.Controls.Add($lblVersao)
+
+# ============================================================
+#  PAGINA: PAINEL
+# ============================================================
+$pgInicio = Nova-Pagina 'inicio' 'Painel' 'Acompanhe o computador em tempo real e execute as principais ações com segurança.'
+Nova-Secao $pgInicio 'MONITORAMENTO EM TEMPO REAL'
+$script:CardCPU   = Novo-Card 'CPU' $script:Paleta.Neon
+$script:CardRAM   = Novo-Card 'MEMÓRIA RAM' $script:Paleta.Cian
+$script:CardGPU   = Novo-Card 'GPU (NVIDIA)' $script:Paleta.Rosa
+$script:CardTemp  = Novo-Card 'TEMPERATURA CPU / GPU' $script:Paleta.Amarelo
+$script:CardDisco = Novo-Card 'ESPAÇO NO SISTEMA' $script:Paleta.Neon
+
+$script:LinhaCards = New-Object System.Windows.Forms.TableLayoutPanel
+$script:LinhaCards.ColumnCount = 5
+$script:LinhaCards.RowCount = 1
+$script:LinhaCards.Height = 106
+$script:LinhaCards.Width = 880
+$script:LinhaCards.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+for ($i = 0; $i -lt 5; $i++) {
+    [void]$script:LinhaCards.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 20)))
+}
+[void]$script:LinhaCards.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+$listaCards = @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:CardTemp, $script:CardDisco)
+for ($i = 0; $i -lt 5; $i++) {
+    $listaCards[$i].Painel.Dock = 'Fill'
+    $script:LinhaCards.Controls.Add($listaCards[$i].Painel, $i, 0)
+}
+$pgInicio.Controls.Add($script:LinhaCards)
+$pgInicio.SetFlowBreak($script:LinhaCards, $true)
+[void]$script:ItensLargos.Add($script:LinhaCards)
+
+$estado = Novo-Cartao 'ESTADO ATUAL' 98
+$script:LblPlano    = Novo-Campo $estado.Corpo 'Plano de energia' 18
+$script:LblModoPerf = Novo-Campo $estado.Corpo 'Modo Performance' 250
+$script:LblDeteccao = Novo-Campo $estado.Corpo 'Detecção de jogos' 482
+$script:LblPerm     = Novo-Campo $estado.Corpo 'Permissões' 714
+$script:LblPerm.Text = 'Administrador'
+$pgInicio.Controls.Add($estado.Outer)
+$pgInicio.SetFlowBreak($estado.Outer, $true)
+
+Nova-Secao $pgInicio 'AÇÕES RÁPIDAS'
+$btnTudo = Novo-Botao "Executar manutenção recomendada`nLimpeza segura, energia, Modo Jogo, rede, disco e relatório antes/depois" { Executar-Tudo } $script:Paleta.Neon 558 84
+$pgInicio.Controls.Add($btnTudo)
+$pgInicio.SetFlowBreak($btnTudo, $true)
+$pgInicio.Controls.Add((Novo-Botao "Criar ponto de restauração`nSalva o estado do Windows antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
+$pgInicio.Controls.Add((Novo-Botao "Desfazer ajustes`nVolta registro, plano de energia e DNS" { Desfazer-Ajustes } $script:Paleta.Rosa))
+
+# ============================================================
+#  PAGINA: PROGRAMAS
+# ============================================================
+$pgProgramas = Nova-Pagina 'programas' 'Programas' 'Sua biblioteca de instaladores, ferramentas e aplicativos. Os arquivos originais nunca sao apagados.'
+Nova-Secao $pgProgramas 'BIBLIOTECA DE PROGRAMAS'
+$lblAjudaProgramas = Novo-Label 'Adicione uma pasta para localizar executaveis e atalhos. A lista fica salva neste computador.' 9 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900
+$pgProgramas.Controls.Add($lblAjudaProgramas); $pgProgramas.SetFlowBreak($lblAjudaProgramas, $true)
+$linhaProgramas = New-Object System.Windows.Forms.Panel
+$linhaProgramas.Width = 900; $linhaProgramas.Height = 44
+$linhaProgramas.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+$txtBuscaProgramas = New-Object System.Windows.Forms.TextBox
+$txtBuscaProgramas.Location = New-Object System.Drawing.Point(0, 4)
+$txtBuscaProgramas.Size = New-Object System.Drawing.Size(330, 30)
+$txtBuscaProgramas.Font = (Fonte 'Segoe UI' 10 'Regular')
+$txtBuscaProgramas.BackColor = (ParaCor $script:Paleta.Painel)
+$txtBuscaProgramas.ForeColor = (ParaCor $script:Paleta.Texto)
+$linhaProgramas.Controls.Add($txtBuscaProgramas)
+$btnPastaProgramas = Novo-BotaoPequeno 'ADICIONAR PASTA' { Adicionar-PastaProgramas } $script:Paleta.Neon 150 34
+$btnPastaProgramas.Location = New-Object System.Drawing.Point(344, 2)
+$linhaProgramas.Controls.Add($btnPastaProgramas)
+$btnAtualizarProgramas = Novo-BotaoPequeno 'ATUALIZAR LISTA' { Atualizar-ListaProgramas } $script:Paleta.Cian 140 34
+$btnAtualizarProgramas.Location = New-Object System.Drawing.Point(504, 2)
+$linhaProgramas.Controls.Add($btnAtualizarProgramas)
+$pgProgramas.Controls.Add($linhaProgramas); $pgProgramas.SetFlowBreak($linhaProgramas, $true)
+$listaProgramas = New-Object System.Windows.Forms.ListView
+$listaProgramas.View = 'Details'; $listaProgramas.FullRowSelect = $true; $listaProgramas.GridLines = $true
+$listaProgramas.Size = New-Object System.Drawing.Size(900, 390)
+$listaProgramas.BackColor = (ParaCor $script:Paleta.Painel); $listaProgramas.ForeColor = (ParaCor $script:Paleta.Texto)
+[void]$listaProgramas.Columns.Add('Programa', 250)
+[void]$listaProgramas.Columns.Add('Tipo', 120)
+[void]$listaProgramas.Columns.Add('Local', 490)
+$pgProgramas.Controls.Add($listaProgramas); $pgProgramas.SetFlowBreak($listaProgramas, $true)
+$btnAbrirPrograma = Novo-Botao 'Abrir selecionado`nExecuta o programa marcado' { Abrir-ProgramaSelecionado } $script:Paleta.Neon 272 70
+$btnRemoverPrograma = Novo-Botao 'Remover da biblioteca`nNao apaga o arquivo original' { Remover-ProgramaSelecionado } $script:Paleta.Rosa 272 70
+$pgProgramas.Controls.Add($btnAbrirPrograma); $pgProgramas.Controls.Add($btnRemoverPrograma)
+$script:ListaProgramasUI = $listaProgramas
+$script:BuscaProgramasUI = $txtBuscaProgramas
+$script:BuscaProgramasUI.Add_TextChanged({ Atualizar-ListaProgramas })
+$AtualizarListaProgramasScript = $null
+Atualizar-ListaProgramas
+
+# ============================================================
+#  PAGINA: DESEMPENHO
+# ============================================================
+$pgDes = Nova-Pagina 'desempenho' 'Desempenho' 'Limpeza, energia, Modo Jogo e ajustes do sistema para ganhar FPS e estabilidade.'
+Nova-Secao $pgDes 'LIMPEZA E ENERGIA'
+$pgDes.Controls.Add((Novo-Botao "Analisar memoria e processos`nVeja os maiores consumidores de RAM e feche apenas os selecionados" { Gerenciar-MemoriaProcessos } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Limpar temporários`nPreserva o cache de shaders e a Lixeira" { Limpar-Temporarios }))
+$pgDes.Controls.Add((Novo-Botao "Limpar cache dos navegadores`nChrome, Edge, Brave e Firefox (senhas preservadas)" { Limpar-Navegadores }))
+$pgDes.Controls.Add((Novo-Botao "Plano Alto desempenho`nAtiva o plano de energia de alto desempenho" { Ajustar-Energia }))
+$pgDes.Controls.Add((Novo-Botao "Plano Desempenho máximo`nPlano oculto do Windows, sem economia de energia" { Ativar-DesempenhoMaximo } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Modo Jogo do Windows`nAtiva o Modo Jogo e desliga a captura em segundo plano" { Ajustar-ModoJogo }))
+Nova-Secao $pgDes 'PERFIS DE ENERGIA'
+$pgDes.Controls.Add((Novo-Botao "Perfil Jogos`nAlto desempenho, quando disponível" { Aplicar-Perfil 'Jogos' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Perfil Desempenho máximo`nMáximo possível: mais consumo e calor" { Aplicar-Perfil 'Maximo' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Perfil Equilibrado`nUso diário com consumo moderado" { Aplicar-Perfil 'Equilibrado' } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Perfil Economia`nReduz o consumo, quando disponível" { Aplicar-Perfil 'Economia' } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'MODO PERFORMANCE'
+$pgDes.Controls.Add((Novo-Botao "Modo Performance: ligar`nFecha apps de fundo e ativa alto desempenho" { Entrar-ModoPerformance } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Modo Performance: desligar`nRestaura o plano de energia anterior" { Sair-ModoPerformance } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Liberar RAM em espera`nLimpa a lista de espera da memória" { Liberar-RAM } $script:Paleta.Rosa))
+Nova-Secao $pgDes 'AJUSTES AVANÇADOS (PEDEM CONFIRMAÇÃO)'
+$pgDes.Controls.Add((Novo-Botao "GPU e efeitos visuais`nHAGS, menos animações e transparência" { Ajustar-GPUSistema } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Horário ativo do Windows Update`nEvita reinício enquanto você joga" { Definir-HorarioAtivo } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Remover bloatware`nEscolha os apps inúteis que deseja remover" { Remover-Bloatware } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'INICIALIZAÇÃO E HARDWARE'
+$pgDes.Controls.Add((Novo-Botao "Apps de inicialização`nLista o que abre junto com o Windows" { Listar-Inicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Inicialização do Windows`nAbre as ferramentas nativas do Windows" { Abrir-GerenciadorInicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Ativar ou desativar apps`nEscolha o que inicia com o Windows (reversível)" { Gerenciar-Inicializacao } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Resumo de hardware`nCPU, RAM, GPU e discos detectados" { Mostrar-ResumoHardware } $script:Paleta.Neon))
+$pgDes.Controls.Add((Novo-Botao "Liberar todos os núcleos`nRemove limites de boot e desativa o core parking" { Liberar-Nucleos } $script:Paleta.Neon))
+
+# ============================================================
+#  PAGINA: DISCO
+# ============================================================
+$pgDisco = Nova-Pagina 'disco' 'Disco' 'Saúde, verificação, otimização e velocidade. TRIM em SSD e desfragmentação apenas em HDD.'
+Nova-Secao $pgDisco 'DIAGNÓSTICO'
+$pgDisco.Controls.Add((Novo-Botao "Saúde e espaço`nSMART, temperatura e desgaste" { Saude-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "Recomendações por unidade`nEspaço livre e tipo SSD/HDD" { Recomendar-Armazenamento } $script:Paleta.Cian))
+$pgDisco.Controls.Add((Novo-Botao "Verificar erros`nVarredura somente leitura" { Verificar-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "Benchmark do disco`nVelocidade de leitura e escrita" { Benchmark-Disco } $script:Paleta.Cian))
+Nova-Secao $pgDisco 'OTIMIZAÇÃO E REPARO'
+$pgDisco.Controls.Add((Novo-Botao "Otimizar discos`nTRIM no SSD e desfragmentação no HDD" { Otimizar-Disco } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Verificação com reparo`nAgenda o CHKDSK para a reinicialização" { Agendar-VerificacaoReparo } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Arquivos do Windows (SFC)`nVerifica a integridade do sistema" { Verificar-ArquivosWindows } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Reparar imagem do Windows (DISM)`nCorrige a base do sistema (precisa de internet)" { Reparar-Imagem } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Reparo completo (DISM + SFC)`nSequência recomendada, de 20 a 40 minutos" { Reparo-Completo } $script:Paleta.Amarelo))
+$pgDisco.Controls.Add((Novo-Botao "Limpeza profunda do Windows`nCache do Windows Update, componentes, relatórios de erro e mais" { Limpeza-Profunda } $script:Paleta.Rosa))
+
+# ============================================================
+#  PAGINA: REDE
+# ============================================================
+$pgRede = Nova-Pagina 'rede' 'Rede' 'Limpe o cache DNS, teste a latência e escolha um servidor DNS mais rápido.'
+Nova-Secao $pgRede 'DIAGNÓSTICO'
+$pgRede.Controls.Add((Novo-Botao "Limpar DNS e testar ping`nLatência para 1.1.1.1 e 8.8.8.8" { Otimizar-Rede }))
+$pgRede.Controls.Add((Novo-Botao "Diagnóstico completo`nAdaptadores, IP, gateway, DNS e conectividade" { Diagnostico-RedeCompleto } $script:Paleta.Cian))
+Nova-Secao $pgRede 'SERVIDOR DNS'
+$cartaoDns = Novo-Cartao 'ESCOLHER SERVIDOR' 124
+$lblDns = New-Object System.Windows.Forms.Label
+$lblDns.Text = 'Altera o DNS de todos os adaptadores conectados. Para voltar ao original, use "Desfazer ajustes" no Painel.'
+$lblDns.AutoSize = $true
+$lblDns.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblDns.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblDns.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoDns.Corpo.Controls.Add($lblDns)
+$script:ComboDns = New-Object System.Windows.Forms.ComboBox
+$script:ComboDns.DropDownStyle = 'DropDownList'
+$script:ComboDns.Size = New-Object System.Drawing.Size(290, 30)
+$script:ComboDns.Font = (Fonte 'Segoe UI' 10 'Regular')
+$script:ComboDns.FlatStyle = 'Flat'
+$script:ComboDns.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:ComboDns.ForeColor = (ParaCor $script:Paleta.Texto)
+[void]$script:ComboDns.Items.Add('Automático (padrão)')
+[void]$script:ComboDns.Items.Add('Cloudflare (1.1.1.1)')
+[void]$script:ComboDns.Items.Add('Google (8.8.8.8)')
+$script:ComboDns.SelectedIndex = 0
+$script:ComboDns.Location = New-Object System.Drawing.Point(18, 74)
+$cartaoDns.Corpo.Controls.Add($script:ComboDns)
+$btnAplicarDns = Novo-BotaoPequeno 'APLICAR DNS' {
+    Executar-Acao {
+        $i = $script:ComboDns.SelectedIndex
+        if ($i -eq 1) { Aplicar-DNS 'Cloudflare' } elseif ($i -eq 2) { Aplicar-DNS 'Google' } else { Aplicar-DNS 'Automatico' }
+    }
+} $script:Paleta.Neon 150 34
+$btnAplicarDns.Location = New-Object System.Drawing.Point(324, 72)
+$cartaoDns.Corpo.Controls.Add($btnAplicarDns)
+$pgRede.Controls.Add($cartaoDns.Outer)
+$pgRede.SetFlowBreak($cartaoDns.Outer, $true)
+
+# ============================================================
+#  PAGINA: PERFIS POR JOGO
+# ============================================================
+$pgJogos = Nova-Pagina 'jogos' 'Perfis por jogo' 'Ao abrir um jogo da lista, o Modo Performance liga sozinho; ao fechar, tudo volta ao normal. Mantenha este programa aberto (ele fica na bandeja).'
+$cartaoAuto = Novo-Cartao 'DETECÇÃO AUTOMÁTICA' 100
+$script:ChkAuto = New-Object System.Windows.Forms.CheckBox
+$script:ChkAuto.Text = 'Ativar o Modo Performance automaticamente ao abrir um jogo da lista'
+$script:ChkAuto.AutoSize = $true
+$script:ChkAuto.Font = (Fonte 'Segoe UI Semibold' 10 'Regular')
+$script:ChkAuto.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ChkAuto.Checked = [bool]$script:Cfg.Auto
+$script:ChkAuto.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoAuto.Corpo.Controls.Add($script:ChkAuto)
+$script:LblStatusJogo = New-Object System.Windows.Forms.Label
+$script:LblStatusJogo.Text = 'Aguardando um jogo da lista...'
+$script:LblStatusJogo.AutoSize = $true
+$script:LblStatusJogo.Font = (Fonte 'Segoe UI' 9 'Regular')
+$script:LblStatusJogo.ForeColor = (ParaCor $script:Paleta.Mudo)
+$script:LblStatusJogo.Location = New-Object System.Drawing.Point(40, 68)
+$cartaoAuto.Corpo.Controls.Add($script:LblStatusJogo)
+$pgJogos.Controls.Add($cartaoAuto.Outer)
+$pgJogos.SetFlowBreak($cartaoAuto.Outer, $true)
+
+$cartaoLista = Novo-Cartao 'JOGOS MONITORADOS' 300
+$script:ListaJogos = New-Object System.Windows.Forms.ListBox
+$script:ListaJogos.Size = New-Object System.Drawing.Size(340, 230)
+$script:ListaJogos.Location = New-Object System.Drawing.Point(18, 44)
+$script:ListaJogos.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:ListaJogos.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ListaJogos.BorderStyle = 'FixedSingle'
+$script:ListaJogos.Font = (Fonte 'Consolas' 10 'Regular')
+foreach ($j in $script:Jogos) { [void]$script:ListaJogos.Items.Add($j) }
+$cartaoLista.Corpo.Controls.Add($script:ListaJogos)
+
+$lblDica = New-Object System.Windows.Forms.Label
+$lblDica.Text = "Digite o nome do processo do jogo, sem .exe.`nVeja o nome no Gerenciador de Tarefas.`nEx.: cs2, GTA5, VALORANT-Win64-Shipping"
+$lblDica.AutoSize = $true
+$lblDica.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblDica.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblDica.Location = New-Object System.Drawing.Point(384, 44)
+$cartaoLista.Corpo.Controls.Add($lblDica)
+
+$script:TxtJogo = New-Object System.Windows.Forms.TextBox
+$script:TxtJogo.Location = New-Object System.Drawing.Point(384, 118)
+$script:TxtJogo.Width = 300
+$script:TxtJogo.Font = (Fonte 'Consolas' 10 'Regular')
+$script:TxtJogo.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:TxtJogo.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:TxtJogo.BorderStyle = 'FixedSingle'
+$cartaoLista.Corpo.Controls.Add($script:TxtJogo)
+
+$btnAddJogo = Novo-BotaoPequeno 'ADICIONAR' {
+    $nome = ("$($script:TxtJogo.Text)".Trim()) -replace '\.exe$', ''
+    if ($nome -and ($script:Jogos -notcontains $nome)) {
+        $script:Jogos += $nome
+        [void]$script:ListaJogos.Items.Add($nome)
+        Salvar-Jogos
+        Log "Jogo adicionado: $nome" Green
+    }
+    $script:TxtJogo.Text = ''
+} $script:Paleta.Neon 144 36
+$btnAddJogo.Location = New-Object System.Drawing.Point(384, 158)
+$cartaoLista.Corpo.Controls.Add($btnAddJogo)
+
+$btnRemJogo = Novo-BotaoPequeno 'REMOVER' {
+    $sel = $script:ListaJogos.SelectedItem
+    if ($sel) {
+        $script:Jogos = @($script:Jogos | Where-Object { $_ -ne $sel })
+        $script:ListaJogos.Items.Remove($sel)
+        Salvar-Jogos
+        Log "Jogo removido: $sel" Yellow
+    }
+} $script:Paleta.Rosa 144 36
+$btnRemJogo.Location = New-Object System.Drawing.Point(540, 158)
+$cartaoLista.Corpo.Controls.Add($btnRemJogo)
+$pgJogos.Controls.Add($cartaoLista.Outer)
+$pgJogos.SetFlowBreak($cartaoLista.Outer, $true)
+
+# ============================================================
+#  PAGINA: MONITOR E ALERTAS
+# ============================================================
+$pgMon = Nova-Pagina 'monitor' 'Monitor e alertas' 'Receba um aviso na bandeja quando as temperaturas passarem do limite. A temperatura da CPU depende do suporte da placa-mãe e pode aparecer como N/D.'
+$cartaoAlerta = Novo-Cartao 'ALERTAS DE TEMPERATURA' 136
+$script:ChkAlertas = New-Object System.Windows.Forms.CheckBox
+$script:ChkAlertas.Text = 'Ativar alertas de temperatura'
+$script:ChkAlertas.AutoSize = $true
+$script:ChkAlertas.Font = (Fonte 'Segoe UI Semibold' 10 'Regular')
+$script:ChkAlertas.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ChkAlertas.Checked = [bool]$script:Cfg.Alertas
+$script:ChkAlertas.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoAlerta.Corpo.Controls.Add($script:ChkAlertas)
+
+function Novo-Limite {
+    param($Pai, [string]$Rotulo, [int]$Valor, [int]$X)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Rotulo
+    $l.AutoSize = $true
+    $l.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+    $l.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $l.Location = New-Object System.Drawing.Point($X, 84)
+    $Pai.Controls.Add($l)
+    $n = New-Object System.Windows.Forms.NumericUpDown
+    $n.Minimum = 40; $n.Maximum = 120; $n.Value = $Valor
+    $n.Width = 70
+    $n.BackColor = (ParaCor $script:Paleta.Fundo)
+    $n.ForeColor = (ParaCor $script:Paleta.Texto)
+    $n.Location = New-Object System.Drawing.Point(($X + 140), 80)
+    $Pai.Controls.Add($n)
+    $u = New-Object System.Windows.Forms.Label
+    $u.Text = ([string][char]0x00B0) + 'C'
+    $u.AutoSize = $true
+    $u.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $u.Location = New-Object System.Drawing.Point(($X + 216), 84)
+    $Pai.Controls.Add($u)
+    return $n
+}
+$script:NumCpu   = Novo-Limite $cartaoAlerta.Corpo 'Limite da CPU' ([int]$script:Cfg.CpuMax) 18
+$script:NumGpu   = Novo-Limite $cartaoAlerta.Corpo 'Limite da GPU' ([int]$script:Cfg.GpuMax) 300
+$script:NumDisco = Novo-Limite $cartaoAlerta.Corpo 'Limite do disco' ([int]$script:Cfg.DiscoMax) 582
+$pgMon.Controls.Add($cartaoAlerta.Outer)
+$pgMon.SetFlowBreak($cartaoAlerta.Outer, $true)
+
+Nova-Secao $pgMon 'HISTÓRICO DA SESSÃO (CPU, GPU E TEMPERATURAS)'
+$script:Grafico = New-Object System.Windows.Forms.Panel
+$script:Grafico.Height = 200
+$script:Grafico.Width = 880
+$script:Grafico.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+Ativar-DoubleBuffer $script:Grafico
+$script:Grafico.Add_Paint({ param($s, $e) Desenhar-Grafico $e.Graphics $s })
+$pgMon.Controls.Add($script:Grafico)
+$pgMon.SetFlowBreak($script:Grafico, $true)
+[void]$script:ItensLargos.Add($script:Grafico)
+
+Nova-Secao $pgMon 'FERRAMENTAS'
+$pgMon.Controls.Add((Novo-Botao "Monitorar no console`n10 leituras de CPU, RAM e GPU" { Monitorar-Console }))
+$pgMon.Controls.Add((Novo-Botao "Exportar histórico (CSV)`nResumo da sessão e arquivo para planilha" { Exportar-Historico } $script:Paleta.Neon))
+$pgMon.Controls.Add((Novo-Botao "Testar notificação`nMostra um aviso de teste na bandeja" {
+    $script:Tray.ShowBalloonTip(4000, 'Otimizador Gamer', 'Notificação de teste: os alertas estão funcionando.', [System.Windows.Forms.ToolTipIcon]::Info)
+    Log 'Notificação de teste enviada.' Green
+} $script:Paleta.Cian))
+
+# ============================================================
+#  PAGINA: DRIVERS
+# ============================================================
+$pgDrv = Nova-Pagina 'drivers' 'Drivers' 'Encontre, faça backup e atualize drivers com segurança. Antes de instalar, a ferramenta cria um ponto de restauração e oferece um backup dos drivers atuais.'
+Nova-Secao $pgDrv 'ASSISTENTE'
+$btnAssistDrv = Novo-Botao "Assistente de drivers (recomendado)`nVerifica problemas, mostra a idade dos drivers e procura atualizações no Windows Update" { Assistente-Drivers } $script:Paleta.Neon 558 84
+$pgDrv.Controls.Add($btnAssistDrv)
+$pgDrv.SetFlowBreak($btnAssistDrv, $true)
+Nova-Secao $pgDrv 'VERIFICAÇÃO E ATUALIZAÇÃO'
+$pgDrv.Controls.Add((Novo-Botao "Procurar atualizações de drivers`nBusca no Windows Update e você escolhe o que instalar" { Atualizar-Drivers } $script:Paleta.Rosa))
+$pgDrv.Controls.Add((Novo-Botao "Dispositivos com problema`nLista hardware com driver ausente ou com erro" { Verificar-DispositivosProblema } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Idade dos drivers`nMostra drivers de componentes principais com mais de 3 anos" { Inventario-Drivers } $script:Paleta.Cian))
+Nova-Secao $pgDrv 'SEGURANÇA'
+$pgDrv.Controls.Add((Novo-Botao "Backup dos drivers atuais`nExporta os drivers instalados para uma pasta à sua escolha" { Backup-Drivers } $script:Paleta.Neon))
+$pgDrv.Controls.Add((Novo-Botao "Criar ponto de restauração`nPermite voltar o Windows ao estado atual" { Criar-PontoRestauracao } $script:Paleta.Cian))
+Nova-Secao $pgDrv 'FABRICANTES E FERRAMENTAS DO WINDOWS'
+$pgDrv.Controls.Add((Novo-Botao "Drivers de vídeo (site oficial)`nVersão atual e página do fabricante da placa de vídeo" { Verificar-Drivers } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Drivers do fabricante do PC`nPesquisa o modelo do equipamento ou da placa-mãe" { Abrir-DriversFabricante } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Gerenciador de Dispositivos`nAbre a ferramenta nativa do Windows" { Start-Process devmgmt.msc } $script:Paleta.Cian))
+
+# ============================================================
+#  PAGINA: DIAGNOSTICO
+# ============================================================
+$pgDiag = Nova-Pagina 'diag' 'Diagnóstico' 'Descubra o que realmente limita o PC antes de ajustar: erros do Windows, drivers, segurança, bateria e testes de estabilidade.'
+Nova-Secao $pgDiag 'VISÃO GERAL'
+$btnDiagCompleto = Novo-Botao "Diagnóstico completo`nHardware, erros, drivers, segurança e discos, com relatório HTML" { Diagnostico-Completo } $script:Paleta.Neon 558 78
+$pgDiag.Controls.Add($btnDiagCompleto)
+$pgDiag.SetFlowBreak($btnDiagCompleto, $true)
+Nova-Secao $pgDiag 'ANÁLISES'
+$pgDiag.Controls.Add((Novo-Botao "Erros do Windows`nFalhas de disco, energia, hardware e travamentos (7 dias)" { Diagnostico-Eventos } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Tempo ligado e reinício pendente`nIndica se o PC precisa reiniciar" { Diagnostico-Sistema } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Hardware e configuração`nNúcleos, RAM (XMP/EXPO) e taxa do monitor" { Diagnostico-PC } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Drivers de vídeo`nVersão, data e página oficial do fabricante" { Verificar-Drivers } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Antivírus e atualizações`nProteção ativa e última atualização do Windows" { Diagnostico-Seguranca } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Saúde da bateria`nCapacidade atual e relatório do Windows" { Saude-Bateria } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Abrir o Windows Update`nBusca e instala atualizações" { Start-Process 'ms-settings:windowsupdate' } $script:Paleta.Neon))
+Nova-Secao $pgDiag 'TESTES'
+$pgDiag.Controls.Add((Novo-Botao "Teste de estabilidade da CPU`n60 segundos com leitura de temperatura" { Teste-Estabilidade 60 } $script:Paleta.Amarelo))
+$pgDiag.Controls.Add((Novo-Botao "Teste de memória do Windows`nAgenda o teste de RAM na reinicialização" { Testar-Memoria } $script:Paleta.Amarelo))
+$pgDiag.Controls.Add((Novo-Botao "Verificação rápida do Defender`nProcura ameaças nas áreas principais" { Escanear-Defender } $script:Paleta.Amarelo))
+
+# ============================================================
+#  PAGINA: AGENDAR E RELATORIOS
+# ============================================================
+$pgAg = Nova-Pagina 'agenda' 'Agendar e relatórios' 'Manutenção automática semanal, relatórios do sistema e histórico de atividades.'
+Nova-Secao $pgAg 'MANUTENÇÃO AUTOMÁTICA'
+$pgAg.Controls.Add((Novo-Botao "Agendar manutenção semanal`nDomingo às 04:00 (roda ao ligar, se perdeu)" { Agendar-Manutencao }))
+$pgAg.Controls.Add((Novo-Botao "Remover agendamento`nCancela a manutenção automática" { Remover-Agendamento } $script:Paleta.Rosa))
+Nova-Secao $pgAg 'RELATÓRIOS E LOGS'
+$pgAg.Controls.Add((Novo-Botao "Exportar relatório do PC`nGera um arquivo com hardware e uso atual" { Exportar-RelatorioSistema } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Abrir histórico de atividades`nOperações registradas hoje" { Abrir-Historico } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "Abrir pasta de logs`nLogs e relatórios antes/depois" { Start-Process explorer.exe -ArgumentList "`"$($script:Pasta)`"" } $script:Paleta.Cian))
+Nova-Secao $pgAg 'RELATÓRIO PARA O CLIENTE E CONFIGURAÇÕES'
+$pgAg.Controls.Add((Novo-Botao "Dados do atendimento`nCliente, técnico, observações e logo para o relatório" { Editar-DadosAtendimento } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Gerar relatório HTML`nDocumento visual com diagnóstico, antes/depois e ajustes" { Relatorio-HTML-Agora } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Exportar configurações`nSalva lista de jogos e limites em um arquivo" { Exportar-Config } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "Importar configurações`nCarrega um arquivo salvo anteriormente" { Importar-Config } $script:Paleta.Cian))
+Nova-Secao $pgAg 'FINALIZAR ATENDIMENTO'
+$pgAg.Controls.Add((Novo-Botao "Finalizar e remover a ferramenta`nGera o relatório final, remove os agendamentos e apaga o programa deste PC" { Finalizar-Remover } '#FF5C7A' 558 78))
+
+# ============================================================
+#  EVENTOS, BANDEJA E TIMER
+# ============================================================
+$script:ChkAuto.Add_CheckedChanged({ Salvar-Config })
+$script:ChkAlertas.Add_CheckedChanged({ Salvar-Config })
+$script:NumCpu.Add_ValueChanged({ Salvar-Config })
+$script:NumGpu.Add_ValueChanged({ Salvar-Config })
+$script:NumDisco.Add_ValueChanged({ Salvar-Config })
+
+$script:Tray = New-Object System.Windows.Forms.NotifyIcon
+$script:Tray.Icon = [System.Drawing.SystemIcons]::Shield
+$script:Tray.Text = 'HS-Tech'
+$script:Tray.Visible = $true
+$menuTray = New-Object System.Windows.Forms.ContextMenuStrip
+$miAbrir = $menuTray.Items.Add('Abrir')
+$miAbrir.Add_Click({ $script:Form.Show(); $script:Form.WindowState = 'Normal'; $script:Form.Activate() })
+$miSair = $menuTray.Items.Add('Sair')
+$miSair.Add_Click({ $script:Form.Close() })
+$script:Tray.ContextMenuStrip = $menuTray
+$script:Tray.Add_DoubleClick({ $script:Form.Show(); $script:Form.WindowState = 'Normal'; $script:Form.Activate() })
+
+$script:Form.Add_Resize({
+    if ($script:Form.WindowState -eq 'Minimized') {
+        $script:Form.Hide()
+        $script:Tray.ShowBalloonTip(2500, 'Otimizador Gamer', 'Continua rodando na bandeja (detecção de jogos e alertas).', [System.Windows.Forms.ToolTipIcon]::Info)
+    } else {
+        Ajustar-Larguras
+    }
+})
+
+$script:Timer = New-Object System.Windows.Forms.Timer
+$script:Timer.Interval = 3000
+$script:Timer.Add_Tick({
+    if ($script:EmTick -or $script:Ocupado) { return }
+    $script:EmTick = $true
+    try { Atualizar-Painel; Verificar-Jogos } catch { } finally { $script:EmTick = $false }
+})
+
+$script:Form.Add_FormClosing({
+    $script:Timer.Stop()
+    if ($script:ModoJogoAtivo) { Sair-ModoPerformance }
+    Restaurar-Notificacoes
+    $script:Tray.Visible = $false
+    $script:Tray.Dispose()
+})
+
+$script:Form.Add_Shown({
+    Ajustar-Larguras
+    Log 'Sistema pronto. Escolha uma área no menu ou execute a manutenção recomendada.' Green
+    if (-not $script:TemNvidia) { Log 'GPU: o HS-Tech tenta ler uso pelo contador nativo do Windows e temperatura via LibreHardwareMonitor/OpenHardwareMonitor. A temperatura depende do driver e do provedor de sensores instalado; valores indisponiveis aparecem como N/D.' Gray }
+    try { Atualizar-Painel } catch { }
+    $script:Timer.Start()
+})
+
+Mostrar-Pagina 'inicio'
+[System.Windows.Forms.Application]::Run($script:Form)
+) { 'Atalho' } else { 'Executavel' }
+        $item = New-Object System.Windows.Forms.ListViewItem([string]$p.Nome)
+        [void]$item.SubItems.Add($tipo); [void]$item.SubItems.Add([string]$p.Caminho)
+        $item.Tag = $p
+        [void]$script:ListaProgramasUI.Items.Add($item)
+    }
+    $script:ListaProgramasUI.EndUpdate()
+}
+function Adicionar-PastaProgramas {
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Escolha uma pasta que contenha os programas ou atalhos que deseja adicionar.'
+    $dlg.ShowNewFolderButton = $false
+    if ($dlg.ShowDialog($script:Form) -ne [System.Windows.Forms.DialogResult]::OK) { $dlg.Dispose(); return }
+    $pasta = $dlg.SelectedPath; $dlg.Dispose()
+    try {
+        $arquivos = @(Get-ChildItem -LiteralPath $pasta -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.exe','.lnk') } | Select-Object -First 500)
+        $novos = 0
+        foreach ($arq in $arquivos) {
+            if (-not ($script:BibliotecaProgramas | Where-Object { $_.Caminho -eq $arq.FullName })) {
+                $script:BibliotecaProgramas += [pscustomobject]@{ Nome = [System.IO.Path]::GetFileNameWithoutExtension($arq.Name); Caminho = $arq.FullName }
+                $novos++
+            }
+        }
+        Salvar-BibliotecaProgramas; Atualizar-ListaProgramas
+        Log "Pasta analisada: $pasta. Programas novos adicionados: $novos." Green
+        [void][System.Windows.Forms.MessageBox]::Show("Foram adicionados $novos itens a biblioteca. Limite de busca: 500 arquivos por pasta.", 'HS-Tech', 'OK', 'Information')
+    } catch { Log "Erro ao importar pasta de programas: $($_.Exception.Message)" Red }
+}
+function Abrir-ProgramaSelecionado {
+    if (-not $script:ListaProgramasUI -or $script:ListaProgramasUI.SelectedItems.Count -eq 0) {
+        [void][System.Windows.Forms.MessageBox]::Show('Selecione um programa na lista.', 'HS-Tech', 'OK', 'Information'); return
+    }
+    $p = $script:ListaProgramasUI.SelectedItems[0].Tag
+    if (-not (Test-Path -LiteralPath ([string]$p.Caminho))) { Log 'O caminho selecionado nao existe mais.' Yellow; Atualizar-ListaProgramas; return }
+    try { Start-Process -FilePath ([string]$p.Caminho); Log "Programa aberto: $($p.Nome)" Green }
+    catch { Log "Nao foi possivel abrir $($p.Nome): $($_.Exception.Message)" Red; [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'HS-Tech', 'OK', 'Error') }
+}
+function Remover-ProgramaSelecionado {
+    if (-not $script:ListaProgramasUI -or $script:ListaProgramasUI.SelectedItems.Count -eq 0) {
+        [void][System.Windows.Forms.MessageBox]::Show('Selecione um programa para remover da biblioteca.', 'HS-Tech', 'OK', 'Information'); return
+    }
+    $p = $script:ListaProgramasUI.SelectedItems[0].Tag
+    $script:BibliotecaProgramas = @($script:BibliotecaProgramas | Where-Object { $_.Caminho -ne $p.Caminho })
+    Salvar-BibliotecaProgramas; Atualizar-ListaProgramas
+    Log "Removido da biblioteca (arquivo preservado): $($p.Nome)" Cyan
+}
+$script:BibliotecaProgramas = @(Ler-BibliotecaProgramas)
+
 function Gerenciar-MemoriaProcessos {
     # O Windows administra a RAM automaticamente; a opcao segura e revisar aplicativos e fechar apenas os escolhidos pelo usuario.
     Log '--- Analise de memoria e processos ---' Cyan
@@ -3623,6 +7275,8 @@ $entradasNav = @(
     @('N', 'diag', 'Diagnóstico'),
     @('G', 'JOGOS'),
     @('N', 'jogos', 'Perfis por jogo'),
+    @('G', 'FERRAMENTAS'),
+    @('N', 'programas', 'Programas'),
     @('N', 'monitor', 'Monitor e alertas'),
     @('G', 'AUTOMAÇÃO'),
     @('N', 'agenda', 'Agendar e relatórios')
@@ -3722,6 +7376,47 @@ $pgInicio.Controls.Add($btnTudo)
 $pgInicio.SetFlowBreak($btnTudo, $true)
 $pgInicio.Controls.Add((Novo-Botao "Criar ponto de restauração`nSalva o estado do Windows antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
 $pgInicio.Controls.Add((Novo-Botao "Desfazer ajustes`nVolta registro, plano de energia e DNS" { Desfazer-Ajustes } $script:Paleta.Rosa))
+
+# ============================================================
+#  PAGINA: PROGRAMAS
+# ============================================================
+$pgProgramas = Nova-Pagina 'programas' 'Programas' 'Sua biblioteca de instaladores, ferramentas e aplicativos. Os arquivos originais nunca sao apagados.'
+Nova-Secao $pgProgramas 'BIBLIOTECA DE PROGRAMAS'
+$lblAjudaProgramas = Novo-Label 'Adicione uma pasta para localizar executaveis e atalhos. A lista fica salva neste computador.' 9 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900
+$pgProgramas.Controls.Add($lblAjudaProgramas); $pgProgramas.SetFlowBreak($lblAjudaProgramas, $true)
+$linhaProgramas = New-Object System.Windows.Forms.Panel
+$linhaProgramas.Width = 900; $linhaProgramas.Height = 44
+$linhaProgramas.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+$txtBuscaProgramas = New-Object System.Windows.Forms.TextBox
+$txtBuscaProgramas.Location = New-Object System.Drawing.Point(0, 4)
+$txtBuscaProgramas.Size = New-Object System.Drawing.Size(330, 30)
+$txtBuscaProgramas.Font = (Fonte 'Segoe UI' 10 'Regular')
+$txtBuscaProgramas.BackColor = (ParaCor $script:Paleta.Painel)
+$txtBuscaProgramas.ForeColor = (ParaCor $script:Paleta.Texto)
+$linhaProgramas.Controls.Add($txtBuscaProgramas)
+$btnPastaProgramas = Novo-BotaoPequeno 'ADICIONAR PASTA' { Adicionar-PastaProgramas } $script:Paleta.Neon 150 34
+$btnPastaProgramas.Location = New-Object System.Drawing.Point(344, 2)
+$linhaProgramas.Controls.Add($btnPastaProgramas)
+$btnAtualizarProgramas = Novo-BotaoPequeno 'ATUALIZAR LISTA' { Atualizar-ListaProgramas } $script:Paleta.Cian 140 34
+$btnAtualizarProgramas.Location = New-Object System.Drawing.Point(504, 2)
+$linhaProgramas.Controls.Add($btnAtualizarProgramas)
+$pgProgramas.Controls.Add($linhaProgramas); $pgProgramas.SetFlowBreak($linhaProgramas, $true)
+$listaProgramas = New-Object System.Windows.Forms.ListView
+$listaProgramas.View = 'Details'; $listaProgramas.FullRowSelect = $true; $listaProgramas.GridLines = $true
+$listaProgramas.Size = New-Object System.Drawing.Size(900, 390)
+$listaProgramas.BackColor = (ParaCor $script:Paleta.Painel); $listaProgramas.ForeColor = (ParaCor $script:Paleta.Texto)
+[void]$listaProgramas.Columns.Add('Programa', 250)
+[void]$listaProgramas.Columns.Add('Tipo', 120)
+[void]$listaProgramas.Columns.Add('Local', 490)
+$pgProgramas.Controls.Add($listaProgramas); $pgProgramas.SetFlowBreak($listaProgramas, $true)
+$btnAbrirPrograma = Novo-Botao 'Abrir selecionado`nExecuta o programa marcado' { Abrir-ProgramaSelecionado } $script:Paleta.Neon 272 70
+$btnRemoverPrograma = Novo-Botao 'Remover da biblioteca`nNao apaga o arquivo original' { Remover-ProgramaSelecionado } $script:Paleta.Rosa 272 70
+$pgProgramas.Controls.Add($btnAbrirPrograma); $pgProgramas.Controls.Add($btnRemoverPrograma)
+$script:ListaProgramasUI = $listaProgramas
+$script:BuscaProgramasUI = $txtBuscaProgramas
+$script:BuscaProgramasUI.Add_TextChanged({ Atualizar-ListaProgramas })
+$AtualizarListaProgramasScript = $null
+Atualizar-ListaProgramas
 
 # ============================================================
 #  PAGINA: DESEMPENHO
