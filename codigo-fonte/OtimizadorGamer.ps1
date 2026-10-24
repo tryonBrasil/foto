@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # ============================================================
-#  OTIMIZADOR GAMER v2 - interface grafica estilo gamer
+#  HS-TECH - OTIMIZADOR GAMER v3.4
 #  Modulos: painel ao vivo, limpeza, desempenho, perfis por jogo,
 #  disco (saude/verificacao/otimizacao/benchmark), rede + DNS,
 #  GPU/visuais, bloatware, alertas de temperatura, agendamento,
@@ -142,7 +142,7 @@ function Log {
 function Confirmar {
     param([string]$Pergunta)
     if ($script:Silencioso) { return $true }
-    $r = [System.Windows.Forms.MessageBox]::Show($Pergunta, 'Otimizador Gamer', 'YesNo', 'Question')
+    $r = [System.Windows.Forms.MessageBox]::Show($Pergunta, 'HS-Tech', 'YesNo', 'Question')
     return ($r -eq 'Yes')
 }
 
@@ -235,16 +235,72 @@ function Temp-CPU {
 }
 
 function Info-GPU {
-    $r = @{ Uso = $null; Temp = $null }
+    # Retorna valores nulos quando o Windows/driver nao fornece sensores confiaveis.
+    # NVIDIA: nvidia-smi. Outras GPUs: contadores do Windows e sensores opcionais.
+    $r = @{ Uso = $null; Temp = $null; Fabricante = 'Desconhecido'; Nome = 'GPU nao identificada' }
+    try {
+        $adaptadores = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop |
+            Where-Object { $_.Name -and $_.Name -notmatch 'Microsoft Basic Display|Remote Display|Virtual Display' })
+        if ($adaptadores.Count -gt 0) {
+            $principal = $adaptadores | Select-Object -First 1
+            $r.Nome = [string]$principal.Name
+            $r.Fabricante = [string]$principal.AdapterCompatibility
+            if ([string]::IsNullOrWhiteSpace($r.Fabricante)) {
+                if ($r.Nome -match 'NVIDIA|GeForce|Quadro|RTX|GTX') { $r.Fabricante = 'NVIDIA' }
+                elseif ($r.Nome -match 'AMD|Radeon') { $r.Fabricante = 'AMD' }
+                elseif ($r.Nome -match 'Intel|Arc|UHD|Iris') { $r.Fabricante = 'Intel' }
+            }
+        }
+    } catch { }
+
+    # NVIDIA: telemetria direta pelo driver quando nvidia-smi estiver disponivel.
     if ($script:TemNvidia) {
         try {
-            $l = (& nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
-            if ($l) {
-                $p = $l -split ','
-                $r.Uso = [int]$p[0].Trim()
-                $r.Temp = [int]$p[1].Trim()
+            $linha = & nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>$null | Select-Object -First 1
+            if ($linha) {
+                $partes = $linha -split ','
+                $usoNvidia = 0
+                $tempNvidia = 0
+                if ([int]::TryParse($partes[0].Trim(), [ref]$usoNvidia)) { $r.Uso = [Math]::Max(0, [Math]::Min(100, $usoNvidia)) }
+                if ([int]::TryParse($partes[1].Trim(), [ref]$tempNvidia)) { $r.Temp = $tempNvidia }
+                $r.Fabricante = 'NVIDIA'
             }
         } catch { }
+    }
+
+    # Uso agregado dos motores GPU do Windows; pode incluir mais de um adaptador.
+    if ($null -eq $r.Uso) {
+        try {
+            $lista = @(Get-Counter -ListSet 'GPU Engine' -ErrorAction Stop |
+                Select-Object -ExpandProperty Counter |
+                Where-Object { $_ -match 'Utilization Percentage' })
+            if ($lista.Count -gt 0) {
+                $amostras = @(Get-Counter -Counter $lista -SampleInterval 1 -MaxSamples 1 -ErrorAction Stop)
+                $valores = @($amostras.CounterSamples | Where-Object { $_.CookedValue -ge 0 } |
+                    ForEach-Object { [double]$_.CookedValue })
+                if ($valores.Count -gt 0) {
+                    $soma = ($valores | Measure-Object -Sum).Sum
+                    $r.Uso = [int][Math]::Max(0, [Math]::Min(100, [Math]::Round($soma)))
+                }
+            }
+        } catch { }
+    }
+
+    # Temperatura por LibreHardwareMonitor/OpenHardwareMonitor, se instalado e ativo.
+    if ($null -eq $r.Temp) {
+        foreach ($namespace in @('root/LibreHardwareMonitor', 'root/OpenHardwareMonitor')) {
+            try {
+                $sensores = @(Get-CimInstance -Namespace $namespace -ClassName Sensor -ErrorAction Stop |
+                    Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'GPU|Core|Hot Spot|Junction' })
+                if ($sensores.Count -gt 0) {
+                    $temperatura = $sensores | Measure-Object -Property Value -Maximum
+                    if ($null -ne $temperatura.Maximum -and $temperatura.Maximum -gt 0 -and $temperatura.Maximum -lt 125) {
+                        $r.Temp = [int][Math]::Round($temperatura.Maximum)
+                        break
+                    }
+                }
+            } catch { }
+        }
     }
     return $r
 }
@@ -3443,7 +3499,7 @@ $script:NavInd.Visible = $false
 $lateral.Controls.Add($script:NavInd)
 
 $lblVersao = New-Object System.Windows.Forms.Label
-$lblVersao.Text = 'Otimizador Gamer  |  v3.3'
+$lblVersao.Text = 'HS-Tech  |  Otimizador Gamer v3.4'
 $lblVersao.AutoSize = $false
 $lblVersao.Dock = 'Bottom'
 $lblVersao.Height = 32
@@ -3798,7 +3854,7 @@ $script:NumDisco.Add_ValueChanged({ Salvar-Config })
 
 $script:Tray = New-Object System.Windows.Forms.NotifyIcon
 $script:Tray.Icon = [System.Drawing.SystemIcons]::Shield
-$script:Tray.Text = 'Otimizador Gamer'
+$script:Tray.Text = 'HS-Tech'
 $script:Tray.Visible = $true
 $menuTray = New-Object System.Windows.Forms.ContextMenuStrip
 $miAbrir = $menuTray.Items.Add('Abrir')
@@ -3836,7 +3892,7 @@ $script:Form.Add_FormClosing({
 $script:Form.Add_Shown({
     Ajustar-Larguras
     Log 'Sistema pronto. Escolha uma área no menu ou execute a manutenção recomendada.' Green
-    if (-not $script:TemNvidia) { Log 'Leitura direta de GPU indisponível: sem NVIDIA-SMI, uso e temperatura podem aparecer como N/D. Placas AMD/Intel continuam utilizáveis; esta versão ainda não lê os sensores desses fabricantes.' Gray }
+    if (-not $script:TemNvidia) { Log 'GPU: o HS-Tech tenta ler uso pelo contador nativo do Windows e temperatura via LibreHardwareMonitor/OpenHardwareMonitor. A temperatura depende do driver e do provedor de sensores instalado; valores indisponiveis aparecem como N/D.' Gray }
     try { Atualizar-Painel } catch { }
     $script:Timer.Start()
 })
