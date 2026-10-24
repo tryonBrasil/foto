@@ -1155,22 +1155,31 @@ function Novo-CampoDiag {
     $tb.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 10)
     return $tb
 }
-$script:DiagCliente = Novo-CampoDiag 360
-$script:DiagContato = Novo-CampoDiag 360
+$pgDiag.Controls.Add((Novo-Label 'Nome do cliente' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
+$script:DiagCliente = Novo-CampoDiag 735
 $script:DiagCliente.AccessibleName = 'Nome do cliente'
+$pgDiag.Controls.Add($script:DiagCliente); $pgDiag.SetFlowBreak($script:DiagCliente, $true)
+$pgDiag.Controls.Add((Novo-Label 'Contato / WhatsApp' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
+$script:DiagContato = Novo-CampoDiag 735
 $script:DiagContato.AccessibleName = 'Contato do cliente'
-$pgDiag.Controls.Add($script:DiagCliente); $pgDiag.Controls.Add($script:DiagContato)
+$pgDiag.Controls.Add($script:DiagContato); $pgDiag.SetFlowBreak($script:DiagContato, $true)
+$pgDiag.Controls.Add((Novo-Label 'Sintoma relatado' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 $script:DiagSintoma = Novo-CampoDiag 735 48 $true
 $script:DiagSintoma.AccessibleName = 'Sintoma relatado'
 $pgDiag.Controls.Add($script:DiagSintoma); $pgDiag.SetFlowBreak($script:DiagSintoma, $true)
+$pgDiag.Controls.Add((Novo-Label 'Servico recomendado' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 $script:DiagServico = Novo-CampoDiag 735 36 $true
 $script:DiagServico.AccessibleName = 'Servico recomendado'
 $pgDiag.Controls.Add($script:DiagServico); $pgDiag.SetFlowBreak($script:DiagServico, $true)
+$pgDiag.Controls.Add((Novo-Label 'Valor das pecas (R$)' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 $script:DiagPecas = Novo-CampoDiag 170
 $script:DiagPecas.Text = '0,00'; $script:DiagPecas.AccessibleName = 'Valor das pecas'
+$pgDiag.Controls.Add($script:DiagPecas); $pgDiag.SetFlowBreak($script:DiagPecas, $true)
+$pgDiag.Controls.Add((Novo-Label 'Valor da mao de obra (R$)' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 $script:DiagMaoObra = Novo-CampoDiag 170
 $script:DiagMaoObra.Text = '0,00'; $script:DiagMaoObra.AccessibleName = 'Valor da mao de obra'
-$pgDiag.Controls.Add($script:DiagPecas); $pgDiag.Controls.Add($script:DiagMaoObra)
+$pgDiag.Controls.Add($script:DiagMaoObra); $pgDiag.SetFlowBreak($script:DiagMaoObra, $true)
+$pgDiag.Controls.Add((Novo-Label 'Observacoes do laudo' 10 $script:Paleta.Mudo)); $pgDiag.SetFlowBreak($pgDiag.Controls[$pgDiag.Controls.Count - 1], $true)
 $script:DiagObs = Novo-CampoDiag 735 70 $true
 $script:DiagObs.AccessibleName = 'Observacoes do laudo'
 $pgDiag.Controls.Add($script:DiagObs); $pgDiag.SetFlowBreak($script:DiagObs, $true)
