@@ -282,7 +282,7 @@ function Desfazer-Ajustes {
 function Limpar-Temporarios {
     Log '--- Limpeza de temporarios ---' Cyan
     $alvos = @(
-        $env:TEMP, "$env:SystemRoot\Temp",
+        $env:TEMP, "$env:SystemRoot\Temp"
         # A Lixeira e preservada intencionalmente; caches de shaders tambem sao mantidos.
     )
     $letra = $env:SystemDrive.TrimEnd(':')
