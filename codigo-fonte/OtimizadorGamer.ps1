@@ -15,6 +15,7 @@ if (-not $Manutencao) {
         if ($argLinha -ieq '-Manutencao') { $Manutencao = [switch]$true }
     }
 }
+$script:PacoteProgramasBase64 = '__HS_TECH_PROGRAMAS_BASE64__'
 $script:CaminhoScript = $PSCommandPath
 $script:EhExe = $false
 if ([string]::IsNullOrWhiteSpace($script:CaminhoScript)) {
@@ -59,6 +60,28 @@ try {
 # ============================================================
 if ($script:EhExe) { $script:Pasta = Join-Path $env:LOCALAPPDATA 'OtimizadorGamer' }
 else { $script:Pasta = Split-Path -Parent $script:CaminhoScript }
+
+# O executável contém um ZIP dos programas permitidos. Na primeira execução,
+# os arquivos são extraídos para o perfil do usuário; o EXE pode ser levado em USB.
+if ($script:EhExe -and $script:PacoteProgramasBase64 -ne '__HS_TECH_PROGRAMAS_BASE64__' -and $env:LOCALAPPDATA) {
+    try {
+        $pastaPacote = Join-Path $env:LOCALAPPDATA 'HS-Tech\programas'
+        $seloPacote = Join-Path $pastaPacote '.hs-tech-bundle-v1'
+        if (-not (Test-Path -LiteralPath $seloPacote)) {
+            $raizPacote = Split-Path $pastaPacote -Parent
+            if (-not (Test-Path $raizPacote)) { New-Item -ItemType Directory -Path $raizPacote -Force | Out-Null }
+            if (Test-Path -LiteralPath $pastaPacote) { Remove-Item -LiteralPath $pastaPacote -Recurse -Force -ErrorAction SilentlyContinue }
+            $zipPacote = Join-Path $env:TEMP ('HS-Tech-programas-' + [guid]::NewGuid().ToString('N') + '.zip')
+            [IO.File]::WriteAllBytes($zipPacote, [Convert]::FromBase64String($script:PacoteProgramasBase64))
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::ExtractToDirectory($zipPacote, $pastaPacote)
+            Remove-Item -LiteralPath $zipPacote -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType File -Path $seloPacote -Force | Out-Null
+        }
+    } catch {
+        try { Log ("Não foi possível preparar os programas incorporados: " + $_.Exception.Message) Yellow } catch { }
+    }
+}
 if (-not (Test-Path $script:Pasta)) { New-Item -ItemType Directory -Path $script:Pasta -Force | Out-Null }
 $script:LogFile       = Join-Path $script:Pasta ("log_{0}.txt" -f (Get-Date -Format 'yyyyMMdd'))
 $script:BackupFile    = Join-Path $script:Pasta 'backup_ajustes.json'
@@ -629,7 +652,7 @@ function Gerenciar-MemoriaProcessos {
 }
 
 
-function Localizar-PastaProgramas {$c=@();if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
+function Localizar-PastaProgramas {$c=@();if($env:LOCALAPPDATA){$c+=(Join-Path (Join-Path $env:LOCALAPPDATA 'HS-Tech') 'programas')};if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
 function Ler-BibliotecaProgramas {$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$f=Join-Path (Join-Path $b 'HS-Tech') 'programas.json';if(Test-Path $f){try{return @((Get-Content $f -Raw -Encoding UTF8|ConvertFrom-Json))}catch{}};return @()}
 function Salvar-BibliotecaProgramas {try{$b=if($env:LOCALAPPDATA){$env:LOCALAPPDATA}else{$env:USERPROFILE};$d=Join-Path $b 'HS-Tech';if(!(Test-Path $d)){[void](New-Item -ItemType Directory -Path $d -Force)};ConvertTo-Json -InputObject @($script:BibliotecaProgramas) -Depth 4|Set-Content (Join-Path $d 'programas.json') -Encoding UTF8}catch{Log "Falha ao salvar biblioteca: $($_.Exception.Message)" Red}}
 function Atualizar-ListaProgramas {if(!$script:ListaProgramasUI){return};$script:ListaProgramasUI.BeginUpdate();try{$script:ListaProgramasUI.Items.Clear();$q='';if($script:BuscaProgramasUI){$q=$script:BuscaProgramasUI.Text.Trim()};foreach($p in @($script:BibliotecaProgramas)){if(!$p.Caminho -or !(Test-Path -LiteralPath ([string]$p.Caminho))){continue};if($q -and $p.Nome -notlike "*$q*" -and $p.Caminho -notlike "*$q*"){continue};$e=[IO.Path]::GetExtension([string]$p.Caminho).ToLowerInvariant();$t=switch($e){'.exe'{'Aplicativo/instalador'}'.lnk'{'Atalho'}'.cmd'{'Script CMD'}'.bat'{'Script BAT'}'.reg'{'Registro do Windows'}'.appx'{'Pacote APPX'}default{'Arquivo'}};$st=if($p.Bloqueado){'Bloqueado por segurança'}elseif($p.Risco){'Requer confirmação'}else{'Disponível'};$it=New-Object System.Windows.Forms.ListViewItem([string]$p.Nome);[void]$it.SubItems.Add($t);[void]$it.SubItems.Add($st);[void]$it.SubItems.Add([string]$p.Caminho);$it.Tag=$p;if($p.Bloqueado){$it.ForeColor=(ParaCor $script:Paleta.Amarelo)};[void]$script:ListaProgramasUI.Items.Add($it)}}finally{$script:ListaProgramasUI.EndUpdate()}}
