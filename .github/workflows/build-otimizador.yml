@@ -72,9 +72,14 @@ jobs:
       - name: Instalar PS2EXE
         shell: powershell
         run: |
+          # Algumas imagens limpas do runner não vêm com PSGallery registrado.
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default -ErrorAction Stop
+          }
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module ps2exe -Scope CurrentUser -Force
-          Import-Module ps2exe
+          Install-Module ps2exe -Repository PSGallery -Scope CurrentUser -Force -AllowClobber
+          Import-Module ps2exe -Force
 
       - name: Gerar executavel unico e portatil
         shell: powershell
