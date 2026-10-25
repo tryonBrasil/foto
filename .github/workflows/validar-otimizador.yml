@@ -50,7 +50,9 @@ jobs:
             @{ Nome = 'Identidade HS-Tech'; Regex = 'HS-TECH - CENTRAL DE FERRAMENTAS' },
             @{ Nome = 'Valida espaço contíguo da nova partição'; Regex = '\$bloco\.Tamanho -lt \$bytes' },
             @{ Nome = 'Nova partição usa o bloco validado'; Regex = 'New-Partition -DiskNumber \$partAtual\.DiskNumber -Offset \(\[UInt64\]\$bloco\.Inicio\)' },
-            @{ Nome = 'Rollback se a criação falhar'; Regex = '\$volumeReduzido -and -not \$particaoNovaCriada' }
+            @{ Nome = 'Rollback se a criação falhar'; Regex = '\$volumeReduzido -and -not \$particaoNovaCriada' },
+            @{ Nome = 'Remove cache HS-Tech na desinstalação'; Regex = '\$pastaDadosHS|pastaDadosHS' },
+            @{ Nome = 'Aviso sobre backup no mesmo disco'; Regex = 'MESMO disco físico' }
           )
           $falhas = @()
           foreach ($v in $verificacoes) {
