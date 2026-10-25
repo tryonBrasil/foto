@@ -764,7 +764,24 @@ function Criar-ParticaoBackup {
     $analiseDepois=Obter-EspacoNaoAlocadoDisco -Disco $discoDepois
     $bloco=$null
     foreach($iv in $analiseDepois.Intervalos){if($null -eq $bloco -or $iv.Tamanho -gt $bloco.Tamanho){$bloco=$iv}}
-    if(!$bloco -or $bloco.Tamanho -lt 1GB){[void][Windows.Forms.MessageBox]::Show('O volume foi reduzido, mas o Windows não apresentou um bloco contíguo suficiente para criar a nova partição. Nenhum volume existente foi formatado. Abra Gerenciamento de Disco para avaliar o espaço liberado.','HS-Tech - Espaço liberado','OK','Warning');return}
+    if(!$bloco -or $bloco.Tamanho -lt $bytes){
+      $motivo = if(!$bloco){'nenhum espaço não alocado foi identificado'}else{('o maior bloco livre tem {0:N2} GB, abaixo dos {1:N2} GB solicitados' -f ($bloco.Tamanho/1GB),($bytes/1GB))}
+      Log ("Não foi possível criar a partição: {0}. Tentando restaurar o tamanho original do volume." -f $motivo) Yellow
+      $revertido = $false
+      try {
+        $limiteRollback = Get-PartitionSupportedSize -DiskNumber $partAtual.DiskNumber -PartitionNumber $partAtual.PartitionNumber -ErrorAction Stop
+        if ([long]$partAtual.Size -le [long]$limiteRollback.SizeMax) {
+          Resize-Partition -DiskNumber $partAtual.DiskNumber -PartitionNumber $partAtual.PartitionNumber -Size ([long]$partAtual.Size) -ErrorAction Stop
+          $revertido = $true
+          Log 'Tamanho original do volume restaurado após falha ao localizar espaço suficiente.' Green
+        }
+      } catch { Log ("A restauração automática do tamanho original falhou: {0}" -f $_.Exception.Message) Red }
+      $aviso = 'O volume foi reduzido, mas não havia um bloco contíguo suficiente para criar a nova partição.'
+      if($revertido){$aviso += ' O tamanho original do volume foi restaurado.'}else{$aviso += ' Não foi possível confirmar a reversão; verifique Gerenciamento de Disco antes de continuar.'}
+      $aviso += ' Nenhum volume existente foi formatado.'
+      [void][Windows.Forms.MessageBox]::Show($aviso,'HS-Tech - Espaço liberado','OK','Warning')
+      return
+    }
     $novo=New-Partition -DiskNumber $partAtual.DiskNumber -Size $bytes -AssignDriveLetter -ErrorAction Stop
     $fmt=Format-Volume -Partition $novo -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
     $script:BackupDestino=$fmt.DriveLetter+':\'
