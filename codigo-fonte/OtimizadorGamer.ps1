@@ -3333,6 +3333,7 @@ function Finalizar-Remover {
     if ($script:EhExe) { $exeAlvo = $script:CaminhoScript }
     elseif ($env:OTIMIZADOR_EXE) { $exeAlvo = $env:OTIMIZADOR_EXE }
     $pastaPadrao = Join-Path $env:LOCALAPPDATA 'OtimizadorGamer'
+    $pastaDadosHS = Join-Path $env:LOCALAPPDATA 'HS-Tech'
     $cmds = @('ping 127.0.0.1 -n 6 >nul')
     if ($exeAlvo -and (Test-Path $exeAlvo)) {
         $cmds += ('del /f /q "{0}"' -f $exeAlvo)
@@ -3345,6 +3346,10 @@ function Finalizar-Remover {
             $cmds += ('del /f /q "{0}"' -f (Join-Path $script:Pasta $padrao))
         }
         if (-not $script:EhExe) { $cmds += ('del /f /q "{0}"' -f $script:CaminhoScript) }
+    }
+    # O bundle extraído e a biblioteca de programas ficam em uma pasta separada da antiga pasta de dados.
+    if (Test-Path -LiteralPath $pastaDadosHS) {
+        $cmds += ('rmdir /s /q "{0}"' -f $pastaDadosHS)
     }
     if ($exeAlvo -and (Test-Path $exeAlvo)) {
         $cmds += 'ping 127.0.0.1 -n 4 >nul'
