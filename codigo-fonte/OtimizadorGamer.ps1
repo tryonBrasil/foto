@@ -706,6 +706,11 @@ function Obter-EspacoNaoAlocadoDisco {
 
 function Criar-ParticaoBackup {
   $nl=[Environment]::NewLine
+  $volumeOriginalTamanho = $null
+  $discoOriginalNumero = $null
+  $particaoOriginalNumero = $null
+  $volumeReduzido = $false
+  $particaoNovaCriada = $false
   try {
     foreach($cmd in @('Get-Partition','Get-Volume','Get-PartitionSupportedSize','Resize-Partition','New-Partition','Format-Volume')) {
       if(-not (Get-Command $cmd -ErrorAction SilentlyContinue)){[void][Windows.Forms.MessageBox]::Show("O Windows não disponibilizou o comando $cmd. Execute o HS-Tech como administrador e tente novamente.",'HS-Tech - Verificação de partição','OK','Warning');return}
@@ -758,7 +763,11 @@ function Criar-ParticaoBackup {
     $confirmacao=('ATENÇÃO: a unidade {0}: será reduzida em {1:N2} GB.'+$nl+'O tamanho atual passará de {2:N2} GB para aproximadamente {3:N2} GB.'+$nl+'O Windows informa que a redução é suportada, mas isso não garante risco zero. Faça backup dos arquivos importantes antes de continuar.'+$nl+$nl+'Após reduzir, o HS-Tech criará uma NOVA partição no espaço liberado e formatará somente essa nova partição em NTFS. Confirme o disco e os dados antes de prosseguir.' -f $letra,($bytes/1GB),($partAtual.Size/1GB),($tamanhoNovo/1GB))
     if(-not (Confirmar $confirmacao)){return}
     Log ("Reduzindo a unidade {0}: em {1:N2} GB após validação do Windows..." -f $letra,($bytes/1GB)) Cyan
+    $volumeOriginalTamanho = [long]$partAtual.Size
+    $discoOriginalNumero = [int]$partAtual.DiskNumber
+    $particaoOriginalNumero = [int]$partAtual.PartitionNumber
     Resize-Partition -DiskNumber $partAtual.DiskNumber -PartitionNumber $partAtual.PartitionNumber -Size $tamanhoNovo -ErrorAction Stop
+    $volumeReduzido = $true
     Start-Sleep -Milliseconds 700
     $discoDepois=Get-Disk -Number $partAtual.DiskNumber -ErrorAction Stop
     $analiseDepois=Obter-EspacoNaoAlocadoDisco -Disco $discoDepois
@@ -783,14 +792,35 @@ function Criar-ParticaoBackup {
       return
     }
     $novo=New-Partition -DiskNumber $partAtual.DiskNumber -Size $bytes -AssignDriveLetter -ErrorAction Stop
+    $particaoNovaCriada = $true
     $fmt=Format-Volume -Partition $novo -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
+    $volumeReduzido = $false
     $script:BackupDestino=$fmt.DriveLetter+':\'
     $script:BackupDestinoLabel.Text='Destino: '+$script:BackupDestino
     Log ("Criada partição HS-TECH-BACKUP em {0}; volume original {1}: reduzido em {2:N2} GB." -f $script:BackupDestino,$letra,($bytes/1GB)) Green
     [void][Windows.Forms.MessageBox]::Show(('Concluído.'+$nl+'Volume original: '+$letra+':'+$nl+'Redução solicitada: '+[math]::Round($bytes/1GB,2)+' GB'+$nl+'Nova partição formatada em NTFS: '+$script:BackupDestino+$nl+$nl+'A partição original não foi formatada. Mesmo assim, redimensionar partições nunca é risco zero. Mantenha uma cópia dos dados importantes em outro disco físico.'),'HS-Tech - Partição criada','OK','Information')
   } catch {
+    $rollbackMensagem = ''
+    if ($volumeReduzido -and -not $particaoNovaCriada -and $null -ne $volumeOriginalTamanho) {
+      try {
+        $estadoAtual = Get-Partition -DiskNumber $discoOriginalNumero -PartitionNumber $particaoOriginalNumero -ErrorAction Stop
+        $limiteRollback = Get-PartitionSupportedSize -DiskNumber $discoOriginalNumero -PartitionNumber $particaoOriginalNumero -ErrorAction Stop
+        if ($volumeOriginalTamanho -le [long]$limiteRollback.SizeMax) {
+          Resize-Partition -DiskNumber $discoOriginalNumero -PartitionNumber $particaoOriginalNumero -Size $volumeOriginalTamanho -ErrorAction Stop
+          $rollbackMensagem = ' O tamanho original do volume foi restaurado.'
+          Log 'Restauração automática do tamanho original concluída após falha na criação da partição.' Green
+        } else {
+          $rollbackMensagem = ' A restauração automática não foi possível; confira Gerenciamento de Disco.'
+        }
+      } catch {
+        $rollbackMensagem = ' A restauração automática falhou; confira Gerenciamento de Disco antes de continuar.'
+        Log ("Falha ao restaurar tamanho original: {0}" -f $_.Exception.Message) Red
+      }
+    } elseif ($particaoNovaCriada) {
+      $rollbackMensagem = ' Uma nova partição pode existir sem formatação concluída; verifique Gerenciamento de Disco.'
+    }
     Log ("Erro ao avaliar/reduzir/criar partição: {0}" -f $_.Exception.Message) Red
-    [void][Windows.Forms.MessageBox]::Show(('Não foi possível concluir a operação. Verifique Gerenciamento de Disco e os dados antes de tentar novamente. Erro: '+$nl+$($_.Exception.Message)),'HS-Tech - Erro','OK','Error')
+    [void][Windows.Forms.MessageBox]::Show(('Não foi possível concluir a operação. Verifique Gerenciamento de Disco e os dados antes de tentar novamente.'+$rollbackMensagem+$nl+'Erro: '+$($_.Exception.Message)),'HS-Tech - Erro','OK','Error')
   }
 }
 function Localizar-PastaProgramas {$c=@();if($env:LOCALAPPDATA){$c+=(Join-Path (Join-Path $env:LOCALAPPDATA 'HS-Tech') 'programas')};if($PSScriptRoot){$c+=(Join-Path $PSScriptRoot 'programas');$c+=(Join-Path $PSScriptRoot 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $PSScriptRoot -Parent) 'programas')};if($script:CaminhoScript){$b=Split-Path $script:CaminhoScript -Parent;$c+=(Join-Path $b 'programas');$c+=(Join-Path $b 'HS-Tech-Extras');$c+=(Join-Path (Split-Path $b -Parent) 'programas')};foreach($x in ($c|Select-Object -Unique)){if(Test-Path -LiteralPath $x -PathType Container){return $x}};return $null}
