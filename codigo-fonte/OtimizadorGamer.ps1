@@ -791,7 +791,7 @@ function Criar-ParticaoBackup {
       [void][Windows.Forms.MessageBox]::Show($aviso,'HS-Tech - Espaço liberado','OK','Warning')
       return
     }
-    $novo=New-Partition -DiskNumber $partAtual.DiskNumber -Size $bytes -AssignDriveLetter -ErrorAction Stop
+    $novo=New-Partition -DiskNumber $partAtual.DiskNumber -Offset ([UInt64]$bloco.Inicio) -Size $bytes -AssignDriveLetter -ErrorAction Stop
     $particaoNovaCriada = $true
     $fmt=Format-Volume -Partition $novo -FileSystem NTFS -NewFileSystemLabel 'HS-TECH-BACKUP' -Confirm:$false -ErrorAction Stop
     $volumeReduzido = $false
