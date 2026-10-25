@@ -47,7 +47,10 @@ jobs:
             @{ Nome = 'Restauracao DNS'; Regex = 'Set-DnsClientServerAddress -InterfaceIndex \$indice' },
             @{ Nome = 'Confirma plano de energia'; Regex = 'Plano Alto desempenho ativado e confirmado' },
             @{ Nome = 'Tratamento da bateria em notebook'; Regex = 'BatteryFullChargedCapacity|BatteryStaticData' },
-            @{ Nome = 'Identidade HS-Tech'; Regex = 'HS-TECH - CENTRAL DE FERRAMENTAS' }
+            @{ Nome = 'Identidade HS-Tech'; Regex = 'HS-TECH - CENTRAL DE FERRAMENTAS' },
+            @{ Nome = 'Valida espaço contíguo da nova partição'; Regex = '\$bloco\.Tamanho -lt \$bytes' },
+            @{ Nome = 'Nova partição usa o bloco validado'; Regex = 'New-Partition -DiskNumber \$partAtual\.DiskNumber -Offset \(\[UInt64\]\$bloco\.Inicio\)' },
+            @{ Nome = 'Rollback se a criação falhar'; Regex = 'Restauração automática do tamanho original' }
           )
           $falhas = @()
           foreach ($v in $verificacoes) {
