@@ -52,7 +52,7 @@ jobs:
             @{ Nome = 'Nova partição usa o bloco validado'; Regex = 'New-Partition -DiskNumber \$partAtual\.DiskNumber -Offset \(\[UInt64\]\$bloco\.Inicio\)' },
             @{ Nome = 'Rollback se a criação falhar'; Regex = '\$volumeReduzido -and -not \$particaoNovaCriada' },
             @{ Nome = 'Remove cache HS-Tech na desinstalação'; Regex = '\$pastaDadosHS|pastaDadosHS' },
-            @{ Nome = 'Aviso sobre backup no mesmo disco'; Regex = 'MESMO disco físico' }
+            @{ Nome = 'Aviso sobre backup no mesmo disco'; Regex = 'MESMO disco' }
           )
           $falhas = @()
           foreach ($v in $verificacoes) {
