@@ -657,8 +657,14 @@ function Gerenciar-MemoriaProcessos {
 # ---------- BACKUP E RESTAURACAO ----------
 function Obter-ArquivosBackup {
  $cats=@($script:BackupChecks.Keys|Where-Object {$script:BackupChecks[$_].Checked});$roots=@();$u=[Environment]::GetFolderPath('UserProfile')
- foreach($p in @('Desktop','Documents','Downloads','Pictures','Videos','Music','Saved Games')){$x=Join-Path $u $p;if(Test-Path -LiteralPath $x -PathType Container){$roots+= $x}}
- foreach($x in @((Join-Path $u 'OneDrive'),(Join-Path $u 'Documents\My Games'),(Join-Path $env:APPDATA 'Microsoft\Windows\GameBar'),(Join-Path $env:APPDATA 'Minecraft'),(Join-Path $env:APPDATA 'Godot'),(Join-Path $env:LOCALAPPDATA 'Packages'),(Join-Path $env:ProgramFiles 'Steam\userdata'))){if($x -and (Test-Path -LiteralPath $x -PathType Container)){$roots+=$x}}
+ $precisaPastas=@($cats|Where-Object {$_ -in @('Pastas pessoais','Fotos','Videos','Documentos','Musicas','Compactados','Projetos')}).Count -gt 0
+ if($precisaPastas){
+   foreach($p in @('Desktop','Documents','Downloads','Pictures','Videos','Music','Saved Games')){$x=Join-Path $u $p;if(Test-Path -LiteralPath $x -PathType Container){$roots+= $x}}
+   $oneDrive=Join-Path $u 'OneDrive';if(Test-Path -LiteralPath $oneDrive -PathType Container){$roots+=$oneDrive}
+ }
+ if($cats -contains 'Jogos e saves'){
+   foreach($x in @((Join-Path $u 'Saved Games'),(Join-Path $u 'Documents\My Games'),(Join-Path $env:APPDATA 'Microsoft\Windows\GameBar'),(Join-Path $env:APPDATA 'Minecraft'),(Join-Path $env:APPDATA 'Godot'),(Join-Path $env:LOCALAPPDATA 'Packages'),(Join-Path $env:ProgramFiles 'Steam\userdata'))){if($x -and (Test-Path -LiteralPath $x -PathType Container)){$roots+=$x}}
+ }
  $ext=@{Fotos=@('.jpg','.jpeg','.png','.gif','.bmp','.webp','.heic','.tif','.tiff','.raw','.cr2','.nef','.arw','.dng');Videos=@('.mp4','.mkv','.mov','.avi','.wmv','.webm','.m4v','.mpeg','.mpg','.3gp');Documentos=@('.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.txt','.rtf','.odt','.ods','.csv');Musicas=@('.mp3','.wav','.flac','.aac','.m4a','.ogg','.wma');Compactados=@('.zip','.7z','.rar','.tar','.gz','.iso');Projetos=@('.ps1','.py','.js','.ts','.html','.css','.java','.cpp','.c','.cs','.sln','.blend','.psd')}
  $out=New-Object 'System.Collections.Generic.List[System.IO.FileInfo]';$seen=@{}
  foreach($root in ($roots|Select-Object -Unique)){try{Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue|ForEach-Object {$f=$_;$take=$false;if($cats -contains 'Pastas pessoais' -and $root -like "$u*"){$take=$true};if($cats -contains 'Jogos e saves' -and ($root -like '*Saved Games*' -or $root -like '*My Games*' -or $root -like '*Steam*userdata*' -or $root -like '*GameBar*' -or $root -like '*Minecraft*' -or $root -like '*Godot*')){$take=$true};foreach($c in $cats){if($ext.ContainsKey($c) -and $ext[$c] -contains $f.Extension.ToLowerInvariant()){$take=$true}};if($take -and !$seen.ContainsKey($f.FullName)){$seen[$f.FullName]=$true;$out.Add($f)}}}catch{}}
