@@ -3205,69 +3205,112 @@ function Limpeza-Profunda {
 }
 
 # ============================================================
-#  LIMPEZA DE ENTREGA (preserva Windows e aplicativos instalados)
+#  LIMPEZA DE ENTREGA (preserva Windows, aplicativos e Área de Trabalho)
 # ============================================================
 function Limpeza-Entrega {
     Log '--- Preparar computador para o cliente ---' Cyan
-    $nl=[Environment]::NewLine
-    $aviso="Esta operação limpa dados locais DESTE usuário, mas preserva Windows e aplicativos instalados." + $nl + $nl + "Não exclui contas na nuvem. Pastas sincronizadas/reparse serão ignoradas." + $nl + $nl + "Feche navegadores e aplicativos antes de continuar."
+    $nl = [Environment]::NewLine
+    $aviso = "Esta operação limpa dados locais DESTE usuário, mas preserva Windows, aplicativos instalados e a Área de Trabalho." + $nl + $nl + "A Área de Trabalho NÃO será apagada. Contas na nuvem não são excluídas; somente sessões e dados locais selecionados." + $nl + $nl + "Feche navegadores e aplicativos antes de continuar."
     if (-not (Confirmar $aviso)) { Log 'Limpeza de entrega cancelada.' Yellow; return }
-    $itens=@(
-        [pscustomobject]@{Id='downloads';Rotulo='Apagar conteúdo de Downloads';Marcado=$true},
-        [pscustomobject]@{Id='desktop';Rotulo='Apagar conteúdo da Área de Trabalho';Marcado=$true},
-        [pscustomobject]@{Id='documents';Rotulo='Apagar conteúdo de Documentos';Marcado=$true},
-        [pscustomobject]@{Id='pictures';Rotulo='Apagar conteúdo de Imagens';Marcado=$true},
-        [pscustomobject]@{Id='videos';Rotulo='Apagar conteúdo de Vídeos';Marcado=$true},
-        [pscustomobject]@{Id='music';Rotulo='Apagar conteúdo de Músicas';Marcado=$true},
-        [pscustomobject]@{Id='browser';Rotulo='Remover perfis locais Chrome, Edge e Firefox (sessões, cookies, senhas e histórico)';Marcado=$true},
-        [pscustomobject]@{Id='credentials';Rotulo='Remover credenciais salvas neste usuário do Windows';Marcado=$true},
-        [pscustomobject]@{Id='tokens';Rotulo='Limpar tokens locais Microsoft/Google (apps poderão pedir novo login)';Marcado=$true},
-        [pscustomobject]@{Id='temp';Rotulo='Limpar arquivos temporários deste usuário';Marcado=$true}
+
+    $itens = @(
+        [pscustomobject]@{ Id='downloads'; Rotulo='Apagar conteúdo de Downloads'; Marcado=$true },
+        [pscustomobject]@{ Id='documents'; Rotulo='Apagar conteúdo de Documentos'; Marcado=$true },
+        [pscustomobject]@{ Id='pictures'; Rotulo='Apagar conteúdo de Imagens'; Marcado=$true },
+        [pscustomobject]@{ Id='videos'; Rotulo='Apagar conteúdo de Vídeos'; Marcado=$true },
+        [pscustomobject]@{ Id='music'; Rotulo='Apagar conteúdo de Músicas'; Marcado=$true },
+        [pscustomobject]@{ Id='browser'; Rotulo='Limpar perfis locais Chrome, Edge e Firefox (sessões, cookies, senhas e histórico)'; Marcado=$true },
+        [pscustomobject]@{ Id='credentials'; Rotulo='Remover credenciais salvas neste usuário do Windows'; Marcado=$true },
+        [pscustomobject]@{ Id='tokens'; Rotulo='Limpar tokens locais Microsoft/Google (apps poderão pedir novo login)'; Marcado=$true },
+        [pscustomobject]@{ Id='temp'; Rotulo='Limpar arquivos temporários deste usuário'; Marcado=$true }
     )
-    $escolha=Mostrar-ListaMarcavel 'Limpeza total para entrega' 'Selecione os dados locais a remover. Exclusão permanente; revise os itens.' $itens 'APAGAR SELECIONADOS'
+    $escolha = Mostrar-ListaMarcavel 'Limpeza total para entrega' 'Selecione os dados locais a remover. A Área de Trabalho e os aplicativos instalados serão preservados.' $itens 'APAGAR SELECIONADOS'
     if ($null -eq $escolha) { Log 'Limpeza cancelada.' Yellow; return }
-    $selecionados=@($itens | Where-Object {$escolha[[string]$_.Id]})
+    $selecionados = @($itens | Where-Object { $escolha[[string]$_.Id] })
     if ($selecionados.Count -eq 0) { Log 'Nenhum item selecionado.' Yellow; return }
-    $texto="Perfil atual: $env:USERDOMAIN\$env:USERNAME" + $nl + "Os dados selecionados serão apagados permanentemente. Digite LIMPAR para confirmar."
-    $digitado=[Microsoft.VisualBasic.Interaction]::InputBox($texto,'Confirmação final de segurança','')
+
+    $texto = "Perfil atual: $env:USERDOMAIN\$env:USERNAME" + $nl + "A Área de Trabalho será preservada. Os dados selecionados serão apagados permanentemente. Digite LIMPAR para confirmar."
+    $digitado = [Microsoft.VisualBasic.Interaction]::InputBox($texto, 'Confirmação final de segurança', '')
     if ($digitado -cne 'LIMPAR') { Log 'Confirmação incorreta. Nada foi apagado.' Yellow; return }
-    $pastas=@{
-        downloads=(Join-Path $env:USERPROFILE 'Downloads')
-        desktop=[Environment]::GetFolderPath('Desktop')
-        documents=[Environment]::GetFolderPath('MyDocuments')
-        pictures=[Environment]::GetFolderPath('MyPictures')
-        videos=[Environment]::GetFolderPath('MyVideos')
-        music=[Environment]::GetFolderPath('MyMusic')
+
+    $pastas = @{
+        downloads = (Join-Path $env:USERPROFILE 'Downloads')
+        documents = [Environment]::GetFolderPath('MyDocuments')
+        pictures = [Environment]::GetFolderPath('MyPictures')
+        videos = [Environment]::GetFolderPath('MyVideos')
+        music = [Environment]::GetFolderPath('MyMusic')
     }
-    $n=0
+    $n = 0
     foreach ($item in $selecionados) {
-        $n++; Passo $n $selecionados.Count $item.Rotulo
+        $n++
+        Passo $n $selecionados.Count $item.Rotulo
         try {
             switch ($item.Id) {
-                {$_ -in @('downloads','desktop','documents','pictures','videos','music')} {
-                    $p=$pastas[$item.Id]
-                    if ($p -and (Test-Path -LiteralPath $p)) {
+                { $_ -in @('downloads','documents','pictures','videos','music') } {
+                    $p = $pastas[$item.Id]
+                    if ($p -and (Test-Path -LiteralPath $p -PathType Container)) {
                         foreach ($obj in @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)) {
-                            if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Log "Ignorado ponto de sincronização: $($obj.FullName)" Yellow; continue }
+                            if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                                Log "Ignorado ponto de sincronização: $($obj.FullName)" Yellow
+                                continue
+                            }
                             Remove-Item -LiteralPath $obj.FullName -Recurse -Force -ErrorAction SilentlyContinue
                         }
                         Log "Pasta processada: $p" Green
                     }
                 }
                 'browser' {
-                    foreach ($p in @((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'),(Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'),(Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'))) {
-                        if (Test-Path -LiteralPath $p) {
+                    foreach ($p in @((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'), (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'), (Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'))) {
+                        if (Test-Path -LiteralPath $p -PathType Container) {
                             foreach ($obj in @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)) {
-                                if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { Remove-Item -LiteralPath $obj.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+                                if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                                    Remove-Item -LiteralPath $obj.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                                }
                             }
                         }
                     }
-                    Log 'Perfis locais dos navegadores removidos; aplicativos preservados.' Green
+                    Log 'Perfis locais dos navegadores limpos; aplicativos preservados.' Green
                 }
                 'credentials' {
-                    $saida=& cmdkey.exe /list 2>$null
-                    $alvos=@()
-                    foreach ($linha in $saida) { if ($linha -match '^\s*(Target|Destino):\s*(.+?)\s*
+                    $saida = & cmdkey.exe /list 2>$null
+                    foreach ($linha in $saida) {
+                        if ($linha -match '^\s*(Target|Destino):\s*(.+)$') {
+                            $alvo = $Matches[2].Trim()
+                            if ($alvo) { & cmdkey.exe "/delete:$alvo" 2>$null | Out-Null }
+                        }
+                    }
+                    Log 'Credenciais salvas do usuário processadas.' Green
+                }
+                'tokens' {
+                    $alvos = @(
+                        (Join-Path $env:LOCALAPPDATA 'Microsoft\TokenBroker\Cache'),
+                        (Join-Path $env:LOCALAPPDATA 'Microsoft\OneAuth'),
+                        (Join-Path $env:LOCALAPPDATA 'Microsoft\IdentityCache'),
+                        (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\AC\TokenBroker')
+                    )
+                    foreach ($p in $alvos) {
+                        if (Test-Path -LiteralPath $p -PathType Container) {
+                            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    Log 'Caches locais de autenticação processados; contas online não foram excluídas.' Green
+                }
+                'temp' {
+                    foreach ($p in @($env:TEMP, (Join-Path $env:LOCALAPPDATA 'Temp'))) {
+                        if ($p -and (Test-Path -LiteralPath $p -PathType Container)) {
+                            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    Log 'Arquivos temporários processados.' Green
+                }
+            }
+        } catch {
+            Log ("Falha em {0}: {1}" -f $item.Rotulo, $_.Exception.Message) Yellow
+        }
+    }
+    Log 'Limpeza de entrega concluída. Área de Trabalho, Windows e aplicativos instalados foram preservados.' Green
+}
+
 # ============================================================
 function Descrever-Ajuste {
     param([string]$Nome, $Valor)
