@@ -3205,6 +3205,1249 @@ function Limpeza-Profunda {
 }
 
 # ============================================================
+#  LIMPEZA DE ENTREGA (preserva Windows e aplicativos instalados)
+# ============================================================
+function Limpeza-Entrega {
+    Log '--- Preparar computador para o cliente ---' Cyan
+    $nl=[Environment]::NewLine
+    $aviso="Esta operação limpa dados locais DESTE usuário, mas preserva Windows e aplicativos instalados." + $nl + $nl + "Não exclui contas na nuvem. Pastas sincronizadas/reparse serão ignoradas." + $nl + $nl + "Feche navegadores e aplicativos antes de continuar."
+    if (-not (Confirmar $aviso)) { Log 'Limpeza de entrega cancelada.' Yellow; return }
+    $itens=@(
+        [pscustomobject]@{Id='downloads';Rotulo='Apagar conteúdo de Downloads';Marcado=$true},
+        [pscustomobject]@{Id='desktop';Rotulo='Apagar conteúdo da Área de Trabalho';Marcado=$true},
+        [pscustomobject]@{Id='documents';Rotulo='Apagar conteúdo de Documentos';Marcado=$true},
+        [pscustomobject]@{Id='pictures';Rotulo='Apagar conteúdo de Imagens';Marcado=$true},
+        [pscustomobject]@{Id='videos';Rotulo='Apagar conteúdo de Vídeos';Marcado=$true},
+        [pscustomobject]@{Id='music';Rotulo='Apagar conteúdo de Músicas';Marcado=$true},
+        [pscustomobject]@{Id='browser';Rotulo='Remover perfis locais Chrome, Edge e Firefox (sessões, cookies, senhas e histórico)';Marcado=$true},
+        [pscustomobject]@{Id='credentials';Rotulo='Remover credenciais salvas neste usuário do Windows';Marcado=$true},
+        [pscustomobject]@{Id='tokens';Rotulo='Limpar tokens locais Microsoft/Google (apps poderão pedir novo login)';Marcado=$true},
+        [pscustomobject]@{Id='temp';Rotulo='Limpar arquivos temporários deste usuário';Marcado=$true}
+    )
+    $escolha=Mostrar-ListaMarcavel 'Limpeza total para entrega' 'Selecione os dados locais a remover. Exclusão permanente; revise os itens.' $itens 'APAGAR SELECIONADOS'
+    if ($null -eq $escolha) { Log 'Limpeza cancelada.' Yellow; return }
+    $selecionados=@($itens | Where-Object {$escolha[[string]$_.Id]})
+    if ($selecionados.Count -eq 0) { Log 'Nenhum item selecionado.' Yellow; return }
+    $texto="Perfil atual: $env:USERDOMAIN\$env:USERNAME" + $nl + "Os dados selecionados serão apagados permanentemente. Digite LIMPAR para confirmar."
+    $digitado=[Microsoft.VisualBasic.Interaction]::InputBox($texto,'Confirmação final de segurança','')
+    if ($digitado -cne 'LIMPAR') { Log 'Confirmação incorreta. Nada foi apagado.' Yellow; return }
+    $pastas=@{
+        downloads=[Environment]::GetFolderPath('Downloads')
+        desktop=[Environment]::GetFolderPath('Desktop')
+        documents=[Environment]::GetFolderPath('MyDocuments')
+        pictures=[Environment]::GetFolderPath('MyPictures')
+        videos=[Environment]::GetFolderPath('MyVideos')
+        music=[Environment]::GetFolderPath('MyMusic')
+    }
+    $n=0
+    foreach ($item in $selecionados) {
+        $n++; Passo $n $selecionados.Count $item.Rotulo
+        try {
+            switch ($item.Id) {
+                {$_ -in @('downloads','desktop','documents','pictures','videos','music')} {
+                    $p=$pastas[$item.Id]
+                    if ($p -and (Test-Path -LiteralPath $p)) {
+                        foreach ($obj in @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)) {
+                            if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Log "Ignorado ponto de sincronização: $($obj.FullName)" Yellow; continue }
+                            Remove-Item -LiteralPath $obj.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                        Log "Pasta processada: $p" Green
+                    }
+                }
+                'browser' {
+                    foreach ($p in @((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'),(Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'),(Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'))) {
+                        if (Test-Path -LiteralPath $p) {
+                            foreach ($obj in @(Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue)) {
+                                if (($obj.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { Remove-Item -LiteralPath $obj.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+                            }
+                        }
+                    }
+                    Log 'Perfis locais dos navegadores removidos; aplicativos preservados.' Green
+                }
+                'credentials' {
+                    $saida=& cmdkey.exe /list 2>$null
+                    $alvos=@()
+                    foreach ($linha in $saida) { if ($linha -match '^\s*(Target|Destino):\s*(.+?)\s*
+# ============================================================
+function Descrever-Ajuste {
+    param([string]$Nome, $Valor)
+    if ($Nome -eq 'PlanoEnergia') { return "Plano de energia: alterado (plano original: $Valor)" }
+    if ($Nome -eq 'DNSAlterado') { return 'DNS: servidor alterado pela ferramenta' }
+    if ($Nome -like 'DNSOriginal|*') {
+        $srv = (@($Valor.ServerAddresses) -join ', ')
+        if (-not $srv) { $srv = 'automático (DHCP)' }
+        return "DNS do adaptador '$($Valor.InterfaceAlias)': alterado (original: $srv)"
+    }
+    if ($Nome -like '*|*') {
+        $partes = $Nome -split '\|', 2
+        $orig = "$Valor"
+        if ($orig -eq '__AUSENTE__') { $orig = 'não existia' }
+        $rotulo = $partes[1]
+        switch -Wildcard ($Nome) {
+            '*GameBar*'           { $rotulo = 'Modo Jogo do Windows' }
+            '*GameDVR_Enabled'    { $rotulo = 'Captura em segundo plano (Game DVR) desativada' }
+            '*AppCaptureEnabled'  { $rotulo = 'Captura de jogos (Game DVR) desativada' }
+            '*HwSchMode'          { $rotulo = 'Agendamento de GPU acelerado por hardware (HAGS)' }
+            '*VisualFXSetting'    { $rotulo = 'Efeitos visuais ajustados para desempenho' }
+            '*EnableTransparency' { $rotulo = 'Transparência do Windows desativada' }
+            '*ActiveHours*'       { $rotulo = 'Horário ativo do Windows Update' }
+        }
+        return "Registro - ${rotulo}: $($partes[0])\$($partes[1]) (valor original: $orig)"
+    }
+    return $Nome
+}
+
+function Montar-RelatorioFinal {
+    $l = @()
+    $l += 'RELATÓRIO FINAL DE OTIMIZAÇÃO E MANUTENÇÃO'
+    $l += '============================================='
+    $l += ("Data: {0}" -f (Get-Date -Format 'dd/MM/yyyy HH:mm'))
+    $l += "Computador: $env:COMPUTERNAME"
+    $l += "Usuário do Windows: $env:USERNAME"
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $cpu = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        $ram = Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum
+        $l += "Windows: $($os.Caption) (build $($os.BuildNumber))"
+        $l += ''
+        $l += 'HARDWARE'
+        $l += "  CPU: $($cpu.Name)"
+        $l += ("  RAM instalada: {0:N1} GB" -f ($ram.Sum / 1GB))
+        foreach ($g in @(Get-CimInstance Win32_VideoController)) { $l += "  GPU: $($g.Name)" }
+        foreach ($d in @(Get-PhysicalDisk -ErrorAction SilentlyContinue)) {
+            $l += ("  Disco: {0} | {1} | {2}" -f $d.FriendlyName, $d.MediaType, $d.HealthStatus)
+        }
+    } catch { $l += '  (não foi possível ler todo o hardware)' }
+    $l += ''
+    $l += 'AJUSTES APLICADOS PELA FERRAMENTA'
+    $qt = 0
+    if (Test-Path $script:BackupFile) {
+        try {
+            $b = Get-Content $script:BackupFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $b.PSObject.Properties) {
+                $l += ('  - ' + (Descrever-Ajuste $p.Name $p.Value))
+                $qt++
+            }
+        } catch { $l += '  (o backup de ajustes não pôde ser lido)' }
+    }
+    if ($qt -eq 0) { $l += '  Nenhum ajuste de configuração registrado.' }
+    $l += ''
+    $l += ('PLANO DE ENERGIA ATUAL: ' + (Nome-PlanoEnergia))
+    $l += ''
+    $l += 'RELATÓRIOS ANTES x DEPOIS'
+    if (Test-Path $script:RelatorioFile) { $l += @(Get-Content $script:RelatorioFile -Encoding UTF8) }
+    else { $l += '  Nenhum relatório antes/depois foi gerado.' }
+    $l += ''
+    $l += 'REGISTRO DE ATIVIDADES (últimas linhas)'
+    foreach ($arq in @(Get-ChildItem -Path $script:Pasta -Filter 'log_*.txt' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $l += "--- $($arq.Name) ---"
+        $l += @(Get-Content $arq.FullName -Tail 250 -Encoding UTF8)
+    }
+    return $l
+}
+
+function Finalizar-Remover {
+    Log '--- Finalizar e remover a ferramenta ---' Cyan
+    $texto = "Esta ação vai:`n`n" +
+             "  - gerar o relatório final na Área de Trabalho;`n" +
+             "  - desligar o Modo Performance e remover as tarefas agendadas;`n" +
+             "  - apagar o programa e todos os seus dados (logs, backup e configurações) deste PC.`n`n" +
+             "Os ajustes já aplicados (energia, DNS, Modo Jogo etc.) continuam valendo, mas o botão Desfazer ajustes deixará de existir.`n`n" +
+             "Deseja continuar?"
+    $r = [System.Windows.Forms.MessageBox]::Show($texto, 'Finalizar e remover', 'YesNo', 'Warning', 'Button2')
+    if ($r -ne 'Yes') { Log 'Cancelado.' Yellow; return }
+
+    if ([string]::IsNullOrWhiteSpace($script:Atendimento.Cliente)) {
+        if (Confirmar "Deseja informar o nome do cliente e observações para o relatório final?") { Editar-DadosAtendimento }
+    }
+
+    # 1) Modo Performance
+    if ($script:ModoJogoAtivo -or $script:PlanoAnterior) {
+        Sair-ModoPerformance
+        $script:ModoJogoAtivo = $false
+    }
+
+    # 2) Tarefas agendadas
+    foreach ($t in @('OtimizadorGamer-Manutencao', 'OtimizadorGamer-Iniciar')) {
+        try {
+            Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction Stop
+            Log "Tarefa agendada removida: $t" Green
+        } catch { }
+    }
+
+    # 3) Relatorio final na Area de Trabalho
+    $destinoRel = Join-Path ([Environment]::GetFolderPath('Desktop')) ("Relatorio_Final_{0}.txt" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+    $relatorioOk = $false
+    try {
+        Montar-RelatorioFinal | Set-Content -Path $destinoRel -Encoding UTF8 -ErrorAction Stop
+        $relatorioOk = $true
+        Log "Relatório final salvo: $destinoRel" Green
+    } catch {
+        Log "Não foi possível salvar o relatório final: $($_.Exception.Message)" Red
+        if (-not (Confirmar 'Não foi possível salvar o relatório final. Deseja remover a ferramenta mesmo assim?')) {
+            Log 'Remoção cancelada.' Yellow
+            return
+        }
+    }
+
+    # 4) Remocao do programa e dos dados (feita por um processo separado, depois que esta janela fechar)
+    $exeAlvo = $null
+    if ($script:EhExe) { $exeAlvo = $script:CaminhoScript }
+    elseif ($env:OTIMIZADOR_EXE) { $exeAlvo = $env:OTIMIZADOR_EXE }
+    $pastaPadrao = Join-Path $env:LOCALAPPDATA 'OtimizadorGamer'
+    $pastaDadosHS = Join-Path $env:LOCALAPPDATA 'HS-Tech'
+    $cmds = @('ping 127.0.0.1 -n 6 >nul')
+    if ($exeAlvo -and (Test-Path $exeAlvo)) {
+        $cmds += ('del /f /q "{0}"' -f $exeAlvo)
+    }
+    if ($script:Pasta -ieq $pastaPadrao) {
+        $cmds += ('rmdir /s /q "{0}"' -f $script:Pasta)
+    } else {
+        # Pasta escolhida pelo usuario: apaga somente os arquivos criados pela ferramenta
+        foreach ($padrao in @('log_*.txt', 'backup_ajustes.json', 'jogos.json', 'config.json', 'relatorios.txt', 'relatorio_sistema_*.txt')) {
+            $cmds += ('del /f /q "{0}"' -f (Join-Path $script:Pasta $padrao))
+        }
+        if (-not $script:EhExe) { $cmds += ('del /f /q "{0}"' -f $script:CaminhoScript) }
+    }
+    # O bundle extraído e a biblioteca de programas ficam em uma pasta separada da antiga pasta de dados.
+    if (Test-Path -LiteralPath $pastaDadosHS) {
+        $cmds += ('rmdir /s /q "{0}"' -f $pastaDadosHS)
+    }
+    if ($exeAlvo -and (Test-Path $exeAlvo)) {
+        $cmds += 'ping 127.0.0.1 -n 4 >nul'
+        $cmds += ('del /f /q "{0}"' -f $exeAlvo)
+    }
+
+    if ($relatorioOk) {
+        $abriu = $false
+        $destinoHtml = Join-Path ([Environment]::GetFolderPath('Desktop')) ("Relatorio_Final_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmm'))
+        try {
+            [void](Gerar-RelatorioHTML $destinoHtml)
+            Log "Relatório HTML salvo: $destinoHtml" Green
+            Start-Process $destinoHtml
+            $abriu = $true
+        } catch { }
+        if (-not $abriu) { try { Start-Process notepad.exe -ArgumentList "`"$destinoRel`"" } catch { } }
+    }
+    [void][System.Windows.Forms.MessageBox]::Show("Tudo pronto.`n`nO relatório final foi salvo na Área de Trabalho. O programa será fechado e removido deste PC em instantes.", 'HS-Tech | Central de Ferramentas', 'OK', 'Information')
+    # So agora inicia a remocao: o processo separado espera esta janela fechar antes de apagar
+    Start-Process -FilePath 'cmd.exe' -ArgumentList ('/c ' + ($cmds -join ' & ')) -WindowStyle Hidden
+    $script:EncerrarAposAcao = $true
+}
+
+# ============================================================
+#  INTERFACE GRAFICA
+# ============================================================
+$script:ItensLargos = New-Object System.Collections.ArrayList
+
+function Executar-Acao {
+    param([scriptblock]$Bloco)
+    if ($script:Ocupado) { Log 'Aguarde: outra tarefa está em andamento.' Yellow; return }
+    $script:Ocupado = $true
+    $script:Form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    foreach ($b in $script:Botoes) { $b.Enabled = $false }
+    try { & $Bloco }
+    catch { Log "Erro: $($_.Exception.Message)" Red }
+    finally {
+        foreach ($b in $script:Botoes) { $b.Enabled = $true }
+        $script:Form.Cursor = [System.Windows.Forms.Cursors]::Default
+        Definir-Progresso 0
+        $script:Ocupado = $false
+        if ($script:EncerrarAposAcao) { $script:Form.Close() }
+    }
+}
+
+function Ativar-DoubleBuffer {
+    param($Ctl)
+    try {
+        $Ctl.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance,NonPublic').SetValue($Ctl, $true, $null)
+    } catch { }
+}
+
+function Ajustar-Larguras {
+    # Faz secoes, linhas e cartoes acompanharem a largura da janela
+    foreach ($c in $script:ItensLargos) {
+        if ($null -ne $c.Parent) {
+            $largura = $c.Parent.ClientSize.Width - $c.Parent.Padding.Horizontal - 24
+            if ($largura -gt 480) { $c.Width = [int]$largura }
+        }
+    }
+}
+
+function Novo-Label {
+    param([string]$Texto, [double]$Tam = 10, [string]$CorHex = '#EAF4FF', [string]$NomeFonte = 'Segoe UI', [string]$Estilo = 'Regular', [int]$Largura = 780)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Texto
+    $l.AutoSize = $true
+    $l.MaximumSize = New-Object System.Drawing.Size($Largura, 0)
+    $l.Font = (Fonte $NomeFonte $Tam $Estilo)
+    $l.ForeColor = (ParaCor $CorHex)
+    $l.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
+    return $l
+}
+
+# ---------- Tile de acao (titulo + descricao + faixa de cor) ----------
+function Achar-Botao {
+    param($Ctl)
+    $c = $Ctl
+    while ($null -ne $c -and -not ($c.Tag -is [scriptblock])) { $c = $c.Parent }
+    return $c
+}
+
+function Destacar-Botao {
+    param($Ctl, [bool]$Sobre)
+    $b = Achar-Botao $Ctl
+    if ($null -eq $b -or -not $b.Enabled) { return }
+    $inner = $b.Controls[0]
+    if ($Sobre) {
+        $b.BackColor = (ParaCor ([string]$inner.Tag))
+        $inner.BackColor = (ParaCor $script:Paleta.Hover)
+    } else {
+        $b.BackColor = (ParaCor $script:Paleta.Borda)
+        $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    }
+}
+
+function Novo-Botao {
+    param([string]$Texto, [scriptblock]$Acao, [string]$CorHex = '', [int]$L = 272, [int]$A = 78)
+    if (-not $CorHex) { $CorHex = $script:Paleta.Neon }
+    $partes = $Texto -split "`n", 2
+    $titulo = $partes[0]
+    $desc = ''
+    if ($partes.Count -gt 1) { $desc = $partes[1] }
+
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size($L, $A)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 14, 14)
+    $outer.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $outer.Tag = $Acao
+
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $inner.Tag = $CorHex
+    $outer.Controls.Add($inner)
+
+    $faixa = New-Object System.Windows.Forms.Panel
+    $faixa.Dock = 'Left'
+    $faixa.Width = 4
+    $faixa.BackColor = (ParaCor $CorHex)
+    $inner.Controls.Add($faixa)
+
+    $lt = New-Object System.Windows.Forms.Label
+    $lt.Text = $titulo
+    $lt.AutoSize = $false
+    $lt.AutoEllipsis = $true
+    $lt.Location = New-Object System.Drawing.Point(18, 12)
+    $lt.Size = New-Object System.Drawing.Size(($L - 38), 22)
+    $lt.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
+    $lt.ForeColor = (ParaCor $script:Paleta.Texto)
+    $lt.BackColor = [System.Drawing.Color]::Transparent
+    $inner.Controls.Add($lt)
+
+    $ld = New-Object System.Windows.Forms.Label
+    $ld.Text = $desc
+    $ld.AutoSize = $false
+    $ld.Location = New-Object System.Drawing.Point(18, 36)
+    $ld.Size = New-Object System.Drawing.Size(($L - 38), ($A - 44))
+    $ld.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+    $ld.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $ld.BackColor = [System.Drawing.Color]::Transparent
+    $inner.Controls.Add($ld)
+
+    foreach ($c in @($outer, $inner, $faixa, $lt, $ld)) {
+        $c.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $c.Add_Click({ param($s, $e) $b = Achar-Botao $s; if ($null -ne $b) { Executar-Acao $b.Tag } })
+        $c.Add_MouseEnter({ param($s, $e) Destacar-Botao $s $true })
+        $c.Add_MouseLeave({ param($s, $e) Destacar-Botao $s $false })
+    }
+    [void]$script:Botoes.Add($outer)
+    return $outer
+}
+
+function Novo-BotaoPequeno {
+    param([string]$Texto, [scriptblock]$Acao, [string]$CorHex = '', [int]$L = 140, [int]$A = 36)
+    if (-not $CorHex) { $CorHex = $script:Paleta.Neon }
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $Texto
+    $b.Size = New-Object System.Drawing.Size($L, $A)
+    $b.FlatStyle = 'Flat'
+    $b.FlatAppearance.BorderColor = (ParaCor $CorHex)
+    $b.FlatAppearance.BorderSize = 1
+    $b.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+    $b.BackColor = (ParaCor $script:Paleta.Painel)
+    $b.ForeColor = (ParaCor $script:Paleta.Texto)
+    $b.Font = (Fonte 'Segoe UI Semibold' 9 'Regular')
+    $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $b.Add_Click($Acao)
+    return $b
+}
+
+# ---------- Cartao de formulario (borda + titulo) ----------
+function Novo-Cartao {
+    param([string]$Titulo, [int]$A = 100, [int]$L = 880)
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size($L, $A)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $outer.Controls.Add($inner)
+    if ($Titulo) {
+        $t = New-Object System.Windows.Forms.Label
+        $t.Text = $Titulo
+        $t.AutoSize = $true
+        $t.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+        $t.ForeColor = (ParaCor $script:Paleta.Cian)
+        $t.Location = New-Object System.Drawing.Point(18, 14)
+        $inner.Controls.Add($t)
+    }
+    [void]$script:ItensLargos.Add($outer)
+    return @{ Outer = $outer; Corpo = $inner }
+}
+
+function Novo-Campo {
+    param($Pai, [string]$Rotulo, [int]$X)
+    $r = New-Object System.Windows.Forms.Label
+    $r.Text = $Rotulo
+    $r.AutoSize = $true
+    $r.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+    $r.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $r.Location = New-Object System.Drawing.Point($X, 40)
+    $Pai.Controls.Add($r)
+    $v = New-Object System.Windows.Forms.Label
+    $v.Text = '--'
+    $v.AutoSize = $false
+    $v.AutoEllipsis = $true
+    $v.Size = New-Object System.Drawing.Size(210, 24)
+    $v.Font = (Fonte 'Segoe UI Semibold' 10.5 'Regular')
+    $v.ForeColor = (ParaCor $script:Paleta.Texto)
+    $v.Location = New-Object System.Drawing.Point($X, 58)
+    $Pai.Controls.Add($v)
+    return $v
+}
+
+# ---------- Card de metrica com barra ----------
+function Novo-Card {
+    param([string]$Titulo, [string]$CorHex)
+    $outer = New-Object System.Windows.Forms.Panel
+    $outer.Size = New-Object System.Drawing.Size(176, 106)
+    $outer.BackColor = (ParaCor $script:Paleta.Borda)
+    $outer.Padding = New-Object System.Windows.Forms.Padding(1)
+    $outer.Margin = New-Object System.Windows.Forms.Padding(0, 0, 12, 0)
+    $inner = New-Object System.Windows.Forms.Panel
+    $inner.Dock = 'Fill'
+    $inner.BackColor = (ParaCor $script:Paleta.Painel)
+    $outer.Controls.Add($inner)
+
+    $t = New-Object System.Windows.Forms.Label
+    $t.Text = $Titulo
+    $t.AutoSize = $true
+    $t.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $t.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $t.Location = New-Object System.Drawing.Point(16, 14)
+    $inner.Controls.Add($t)
+
+    $v = New-Object System.Windows.Forms.Label
+    $v.Text = '--'
+    $v.AutoSize = $true
+    $v.Font = (Fonte 'Segoe UI Semibold' 20 'Regular')
+    $v.ForeColor = (ParaCor $CorHex)
+    $v.Location = New-Object System.Drawing.Point(14, 34)
+    $inner.Controls.Add($v)
+
+    $trilho = New-Object System.Windows.Forms.Panel
+    $trilho.Location = New-Object System.Drawing.Point(16, 84)
+    $trilho.Size = New-Object System.Drawing.Size(142, 5)
+    $trilho.Anchor = 'Top,Left,Right'
+    $trilho.BackColor = (ParaCor $script:Paleta.Trilho)
+    $fill = New-Object System.Windows.Forms.Panel
+    $fill.Dock = 'Left'
+    $fill.Width = 0
+    $fill.BackColor = (ParaCor $CorHex)
+    $trilho.Controls.Add($fill)
+    $inner.Controls.Add($trilho)
+
+    return @{ Painel = $outer; Valor = $v; Barra = $fill; Trilho = $trilho; Cor = $CorHex }
+}
+
+function Nova-Pagina {
+    param([string]$Nome, [string]$Titulo, [string]$Sub)
+    $p = New-Object System.Windows.Forms.FlowLayoutPanel
+    $p.Dock = 'Fill'
+    $p.AutoScroll = $true
+    $p.Padding = New-Object System.Windows.Forms.Padding(30, 24, 18, 18)
+    $p.BackColor = (ParaCor $script:Paleta.Fundo)
+    $p.Visible = $false
+    Ativar-DoubleBuffer $p
+    $t = Novo-Label $Titulo 20 $script:Paleta.Texto 'Segoe UI Semibold' 'Regular'
+    $t.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 2)
+    $p.Controls.Add($t); $p.SetFlowBreak($t, $true)
+    $s = Novo-Label $Sub 9.5 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900
+    $s.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 14)
+    $p.Controls.Add($s); $p.SetFlowBreak($s, $true)
+    $linha = New-Object System.Windows.Forms.Panel
+    $linha.Height = 1; $linha.Width = 880
+    $linha.BackColor = (ParaCor $script:Paleta.Borda)
+    $linha.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 14)
+    $p.Controls.Add($linha); $p.SetFlowBreak($linha, $true)
+    [void]$script:ItensLargos.Add($linha)
+    $script:Paginas[$Nome] = $p
+    $script:Conteudo.Controls.Add($p)
+    return $p
+}
+
+function Nova-Secao {
+    param($Pagina, [string]$Texto)
+    $c = New-Object System.Windows.Forms.Panel
+    $c.Height = 30; $c.Width = 880
+    $c.Margin = New-Object System.Windows.Forms.Padding(0, 8, 0, 8)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Texto
+    $l.AutoSize = $true
+    $l.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+    $l.ForeColor = (ParaCor $script:Paleta.Cian)
+    $l.Location = New-Object System.Drawing.Point(0, 7)
+    $c.Controls.Add($l)
+    $ln = New-Object System.Windows.Forms.Panel
+    $ln.Dock = 'Bottom'; $ln.Height = 1
+    $ln.BackColor = (ParaCor $script:Paleta.Borda)
+    $c.Controls.Add($ln)
+    $Pagina.Controls.Add($c); $Pagina.SetFlowBreak($c, $true)
+    [void]$script:ItensLargos.Add($c)
+}
+
+function Mostrar-Pagina {
+    param([string]$Nome)
+    foreach ($k in @($script:Paginas.Keys)) { $script:Paginas[$k].Visible = ($k -eq $Nome) }
+    foreach ($b in $script:NavBotoes) {
+        if ($b.Tag -eq $Nome) {
+            $b.ForeColor = (ParaCor $script:Paleta.Neon)
+            $b.BackColor = (ParaCor $script:Paleta.Hover)
+            $b.Font = $script:FonteNavAtiva
+            $script:NavInd.Top = $b.Top
+            $script:NavInd.Visible = $true
+            $script:NavInd.BringToFront()
+        } else {
+            $b.ForeColor = (ParaCor $script:Paleta.Texto)
+            $b.BackColor = (ParaCor $script:Paleta.Lateral)
+            $b.Font = $script:FonteNav
+        }
+    }
+    Ajustar-Larguras
+}
+
+# ============================================================
+#  JANELA PRINCIPAL
+# ============================================================
+$script:FonteNav = (Fonte 'Segoe UI' 10 'Regular')
+$script:FonteNavAtiva = (Fonte 'Segoe UI Semibold' 10 'Regular')
+
+$script:Form = New-Object System.Windows.Forms.Form
+$script:Form.Text = 'HS-Tech | Central de Ferramentas'
+$script:Form.Icon = [System.Drawing.SystemIcons]::Shield
+$areaUtil = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$larguraJanela = [int][math]::Min(1420, $areaUtil.Width - 24)
+$alturaJanela = [int][math]::Min(900, $areaUtil.Height - 24)
+$larguraMin = [int][math]::Min(1180, $larguraJanela)
+$alturaMin = [int][math]::Min(760, $alturaJanela)
+$script:Form.MinimumSize = New-Object System.Drawing.Size($larguraMin, $alturaMin)
+$script:Form.Size = New-Object System.Drawing.Size($larguraJanela, $alturaJanela)
+$script:Form.StartPosition = 'CenterScreen'
+$script:Form.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:Form.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:Form.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+Ativar-DoubleBuffer $script:Form
+
+$script:Conteudo = New-Object System.Windows.Forms.Panel
+$script:Conteudo.Dock = 'Fill'
+$script:Conteudo.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:Form.Controls.Add($script:Conteudo)
+
+# ---------- Barra lateral ----------
+$lateral = New-Object System.Windows.Forms.Panel
+$lateral.Dock = 'Left'
+$lateral.Width = 224
+$lateral.BackColor = (ParaCor $script:Paleta.Lateral)
+$script:Form.Controls.Add($lateral)
+
+$bordaLateral = New-Object System.Windows.Forms.Panel
+$bordaLateral.Dock = 'Right'
+$bordaLateral.Width = 1
+$bordaLateral.BackColor = (ParaCor $script:Paleta.Borda)
+$lateral.Controls.Add($bordaLateral)
+
+# ---------- Rodape: registro de atividades ----------
+$rodape = New-Object System.Windows.Forms.Panel
+$rodape.Dock = 'Bottom'
+$rodape.Height = 36
+$rodape.Tag = 'Recolhido'
+$rodape.BackColor = (ParaCor '#050C16')
+$script:Form.Controls.Add($rodape)
+
+$script:TxtLog = New-Object System.Windows.Forms.RichTextBox
+$script:TxtLog.Dock = 'Fill'
+$script:TxtLog.ReadOnly = $true
+$script:TxtLog.BorderStyle = 'None'
+$script:TxtLog.BackColor = (ParaCor '#050C16')
+$script:TxtLog.ForeColor = (ParaCor '#A9BBD0')
+$script:TxtLog.Font = (Fonte 'Consolas' 9 'Regular')
+$script:TxtLog.Visible = $false
+$rodape.Controls.Add($script:TxtLog)
+
+$barraLog = New-Object System.Windows.Forms.Panel
+$barraLog.Dock = 'Top'
+$barraLog.Height = 30
+$barraLog.BackColor = (ParaCor '#0A1626')
+$lblLog = New-Object System.Windows.Forms.Label
+$lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+$lblLog.Cursor = [System.Windows.Forms.Cursors]::Hand
+$lblLog.AutoSize = $true
+$lblLog.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$lblLog.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblLog.Location = New-Object System.Drawing.Point(20, 8)
+$barraLog.Controls.Add($lblLog)
+$alternarLog = {
+    if ($rodape.Tag -eq 'Recolhido') {
+        $rodape.Height = 170
+        $rodape.Tag = 'Expandido'
+        $script:TxtLog.Visible = $true
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [-]'
+    } else {
+        $rodape.Height = 36
+        $rodape.Tag = 'Recolhido'
+        $script:TxtLog.Visible = $false
+        $lblLog.Text = 'REGISTRO DE ATIVIDADES  [+]'
+    }
+}
+$lblLog.Add_Click($alternarLog)
+$barraLog.Add_Click($alternarLog)
+$btnLimparLog = New-Object System.Windows.Forms.Button
+$btnLimparLog.Text = 'LIMPAR'
+$btnLimparLog.Dock = 'Right'
+$btnLimparLog.Width = 90
+$btnLimparLog.FlatStyle = 'Flat'
+$btnLimparLog.FlatAppearance.BorderSize = 0
+$btnLimparLog.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+$btnLimparLog.ForeColor = (ParaCor $script:Paleta.Mudo)
+$btnLimparLog.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$btnLimparLog.Cursor = [System.Windows.Forms.Cursors]::Hand
+$btnLimparLog.Add_Click({ $script:TxtLog.Clear() })
+$barraLog.Controls.Add($btnLimparLog)
+$rodape.Controls.Add($barraLog)
+
+$script:BarraFundo = New-Object System.Windows.Forms.Panel
+$script:BarraFundo.Dock = 'Top'
+$script:BarraFundo.Height = 4
+$script:BarraFundo.BackColor = (ParaCor $script:Paleta.Trilho)
+$script:BarraFill = New-Object System.Windows.Forms.Panel
+$script:BarraFill.Dock = 'Left'
+$script:BarraFill.Width = 0
+$script:BarraFill.BackColor = (ParaCor $script:Paleta.Neon)
+$script:BarraFundo.Controls.Add($script:BarraFill)
+$rodape.Controls.Add($script:BarraFundo)
+
+# ---------- Cabecalho ----------
+$script:Cabecalho = New-Object System.Windows.Forms.Panel
+$script:Cabecalho.Dock = 'Top'
+$script:Cabecalho.Height = 76
+$script:Cabecalho.BackColor = (ParaCor $script:Paleta.Lateral)
+
+$linhaCab = New-Object System.Windows.Forms.Panel
+$linhaCab.Dock = 'Bottom'; $linhaCab.Height = 1
+$linhaCab.BackColor = (ParaCor $script:Paleta.Borda)
+$script:Cabecalho.Controls.Add($linhaCab)
+
+$marca = New-Object System.Windows.Forms.Panel
+$marca.Size = New-Object System.Drawing.Size(6, 38)
+$marca.Location = New-Object System.Drawing.Point(26, 17)
+$marca.BackColor = (ParaCor $script:Paleta.Neon)
+$script:Cabecalho.Controls.Add($marca)
+
+$lblT1 = New-Object System.Windows.Forms.Label
+$lblT1.Text = 'HS-TECH'
+$lblT1.AutoSize = $true
+$lblT1.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+$lblT1.ForeColor = (ParaCor $script:Paleta.Texto)
+$lblT1.Location = New-Object System.Drawing.Point(42, 10)
+$script:Cabecalho.Controls.Add($lblT1)
+
+$lblT2 = New-Object System.Windows.Forms.Label
+$lblT2.Text = 'CENTRAL'
+$lblT2.AutoSize = $true
+$lblT2.Font = (Fonte 'Segoe UI Black' 17 'Regular')
+$lblT2.ForeColor = (ParaCor $script:Paleta.Neon)
+$lblT2.Location = New-Object System.Drawing.Point((42 + $lblT1.PreferredWidth + 4), 10)
+$script:Cabecalho.Controls.Add($lblT2)
+
+$lblSub = New-Object System.Windows.Forms.Label
+$lblSub.Text = 'Desempenho • diagnóstico • manutenção inteligente do Windows'
+$lblSub.AutoSize = $true
+$lblSub.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblSub.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblSub.Location = New-Object System.Drawing.Point(44, 44)
+$script:Cabecalho.Controls.Add($lblSub)
+
+$script:ChipAdmin = New-Object System.Windows.Forms.Label
+$script:ChipAdmin.Text = ([string][char]0x25CF) + '  ADMINISTRADOR'
+$script:ChipAdmin.AutoSize = $true
+$script:ChipAdmin.Font = (Fonte 'Segoe UI Semibold' 8.5 'Regular')
+$script:ChipAdmin.ForeColor = (ParaCor $script:Paleta.Neon)
+$script:ChipAdmin.Location = New-Object System.Drawing.Point(700, 20)
+$script:Cabecalho.Controls.Add($script:ChipAdmin)
+
+$script:ChipVer = New-Object System.Windows.Forms.Label
+$script:ChipVer.Text = 'Versão 3.6.0'
+$script:ChipVer.AutoSize = $true
+$script:ChipVer.Font = (Fonte 'Segoe UI' 8.5 'Regular')
+$script:ChipVer.ForeColor = (ParaCor $script:Paleta.Mudo)
+$script:ChipVer.Location = New-Object System.Drawing.Point(700, 42)
+$script:Cabecalho.Controls.Add($script:ChipVer)
+
+$script:Cabecalho.Add_Resize({
+    $script:ChipAdmin.Left = $script:Cabecalho.Width - $script:ChipAdmin.Width - 30
+    $script:ChipVer.Left = $script:Cabecalho.Width - $script:ChipVer.Width - 30
+})
+$script:Form.Controls.Add($script:Cabecalho)
+
+# ---------- Navegacao agrupada ----------
+$entradasNav = @(
+    @('G', 'VISÃO GERAL'),
+    @('N', 'inicio', 'Painel'),
+    @('G', 'OTIMIZAÇÃO'),
+    @('N', 'desempenho', 'Desempenho'),
+    @('N', 'disco', 'Disco'),
+    @('N', 'rede', 'Rede'),
+    @('N', 'drivers', 'Drivers'),
+    @('N', 'diag', 'Diagnóstico'),
+    @('G', 'JOGOS'),
+    @('N', 'jogos', 'Perfis por jogo'),
+    @('N', 'backup', 'Backup e restauração'),
+    @('N', 'programas', 'Programas'),
+    @('N', 'monitor', 'Monitor e alertas'),
+    @('G', 'AUTOMAÇÃO'),
+    @('N', 'agenda', 'Agendar e relatórios')
+)
+$y = 14
+foreach ($en in $entradasNav) {
+    if ($en[0] -eq 'G') {
+        if ($y -gt 14) { $y += 6 }
+        $g = New-Object System.Windows.Forms.Label
+        $g.Text = $en[1]
+        $g.AutoSize = $true
+        $g.Font = (Fonte 'Segoe UI Semibold' 7.5 'Regular')
+        $g.ForeColor = (ParaCor $script:Paleta.Mudo)
+        $g.Location = New-Object System.Drawing.Point(26, $y)
+        $lateral.Controls.Add($g)
+        $y += 20
+    } else {
+        $nb = New-Object System.Windows.Forms.Button
+        $nb.Text = $en[2]
+        $nb.Tag = $en[1]
+        $nb.Location = New-Object System.Drawing.Point(0, $y)
+        $nb.Size = New-Object System.Drawing.Size(223, 32)
+        $nb.FlatStyle = 'Flat'
+        $nb.FlatAppearance.BorderSize = 0
+        $nb.FlatAppearance.MouseOverBackColor = (ParaCor $script:Paleta.Hover)
+        $nb.BackColor = (ParaCor $script:Paleta.Lateral)
+        $nb.ForeColor = (ParaCor $script:Paleta.Texto)
+        $nb.Font = $script:FonteNav
+        $nb.TextAlign = 'MiddleLeft'
+        $nb.Padding = New-Object System.Windows.Forms.Padding(26, 0, 0, 0)
+        $nb.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $nb.Add_Click({ param($s, $e) Mostrar-Pagina $s.Tag })
+        $lateral.Controls.Add($nb)
+        [void]$script:NavBotoes.Add($nb)
+        $y += 33
+    }
+}
+$script:NavInd = New-Object System.Windows.Forms.Panel
+$script:NavInd.Size = New-Object System.Drawing.Size(4, 32)
+$script:NavInd.BackColor = (ParaCor $script:Paleta.Neon)
+$script:NavInd.Visible = $false
+$lateral.Controls.Add($script:NavInd)
+
+$lblVersao = New-Object System.Windows.Forms.Label
+$lblVersao.Text = 'HS-TECH  |  Central de Ferramentas v3.6.0'
+$lblVersao.AutoSize = $false
+$lblVersao.Dock = 'Bottom'
+$lblVersao.Height = 32
+$lblVersao.TextAlign = 'MiddleLeft'
+$lblVersao.Padding = New-Object System.Windows.Forms.Padding(26, 0, 0, 0)
+$lblVersao.Font = (Fonte 'Segoe UI' 8 'Regular')
+$lblVersao.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lateral.Controls.Add($lblVersao)
+
+# ============================================================
+#  PAGINA: PAINEL
+# ============================================================
+$pgInicio = Nova-Pagina 'inicio' 'Painel' 'Acompanhe o computador em tempo real e execute as principais ações com segurança.'
+Nova-Secao $pgInicio 'MONITORAMENTO EM TEMPO REAL'
+$script:CardCPU   = Novo-Card 'CPU' $script:Paleta.Neon
+$script:CardRAM   = Novo-Card 'MEMÓRIA RAM' $script:Paleta.Cian
+$script:CardGPU   = Novo-Card 'GPU (NVIDIA)' $script:Paleta.Rosa
+$script:CardTemp  = Novo-Card 'TEMPERATURA CPU / GPU' $script:Paleta.Amarelo
+$script:CardDisco = Novo-Card 'ESPAÇO NO SISTEMA' $script:Paleta.Neon
+
+$script:LinhaCards = New-Object System.Windows.Forms.TableLayoutPanel
+$script:LinhaCards.ColumnCount = 5
+$script:LinhaCards.RowCount = 1
+$script:LinhaCards.Height = 106
+$script:LinhaCards.Width = 880
+$script:LinhaCards.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+for ($i = 0; $i -lt 5; $i++) {
+    [void]$script:LinhaCards.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 20)))
+}
+[void]$script:LinhaCards.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+$listaCards = @($script:CardCPU, $script:CardRAM, $script:CardGPU, $script:CardTemp, $script:CardDisco)
+for ($i = 0; $i -lt 5; $i++) {
+    $listaCards[$i].Painel.Dock = 'Fill'
+    $script:LinhaCards.Controls.Add($listaCards[$i].Painel, $i, 0)
+}
+$pgInicio.Controls.Add($script:LinhaCards)
+$pgInicio.SetFlowBreak($script:LinhaCards, $true)
+[void]$script:ItensLargos.Add($script:LinhaCards)
+
+$estado = Novo-Cartao 'ESTADO ATUAL' 98
+$script:LblPlano    = Novo-Campo $estado.Corpo 'Plano de energia' 18
+$script:LblModoPerf = Novo-Campo $estado.Corpo 'Modo Performance' 250
+$script:LblDeteccao = Novo-Campo $estado.Corpo 'Detecção de jogos' 482
+$script:LblPerm     = Novo-Campo $estado.Corpo 'Permissões' 714
+$script:LblPerm.Text = 'Administrador'
+$pgInicio.Controls.Add($estado.Outer)
+$pgInicio.SetFlowBreak($estado.Outer, $true)
+
+Nova-Secao $pgInicio 'AÇÕES RÁPIDAS'
+$btnTudo = Novo-Botao "Executar manutenção recomendada`nLimpeza segura, energia, Modo Jogo, rede, disco e relatório antes/depois" { Executar-Tudo } $script:Paleta.Neon 558 84
+$pgInicio.Controls.Add($btnTudo)
+$pgInicio.SetFlowBreak($btnTudo, $true)
+$pgInicio.Controls.Add((Novo-Botao "Criar ponto de restauração`nSalva o estado do Windows antes de ajustar" { Criar-PontoRestauracao } $script:Paleta.Cian))
+$pgInicio.Controls.Add((Novo-Botao "Desfazer ajustes`nVolta registro, plano de energia e DNS" { Desfazer-Ajustes } $script:Paleta.Rosa))
+
+# ============================================================
+
+# ============================================================
+#  PAGINA: BACKUP E RESTAURACAO
+# ============================================================
+$pgBackup=Nova-Pagina 'backup' 'Backup e restauração' 'Salve dados antes de formatar e restaure depois.'
+Nova-Secao $pgBackup 'SELECIONE O QUE DESEJA SALVAR'
+$script:BackupChecks=@{}
+$catsPanel=New-Object Windows.Forms.FlowLayoutPanel;$catsPanel.Width=900;$catsPanel.Height=78;$catsPanel.WrapContents=$true
+foreach($cat in @('Fotos','Videos','Documentos','Musicas','Compactados','Projetos','Pastas pessoais','Jogos e saves')){$cb=New-Object Windows.Forms.CheckBox;$cb.Text=$cat;$cb.Checked=($cat -in @('Fotos','Videos','Documentos','Compactados','Projetos','Pastas pessoais','Jogos e saves'));$cb.AutoSize=$true;$cb.Margin=New-Object Windows.Forms.Padding(8,7,15,7);$cb.ForeColor=ParaCor $script:Paleta.Texto;$catsPanel.Controls.Add($cb);$script:BackupChecks[$cat]=$cb}
+$pgBackup.Controls.Add($catsPanel);$pgBackup.SetFlowBreak($catsPanel,$true)
+$warn=Novo-Label 'Busca nas pastas do usuário e locais comuns de saves. Jogos podem usar caminhos personalizados; confira o resultado antes de formatar.' 9 $script:Paleta.Amarelo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($warn);$pgBackup.SetFlowBreak($warn,$true)
+$line=New-Object Windows.Forms.Panel;$line.Width=900;$line.Height=42
+$b=Novo-BotaoPequeno 'ESCOLHER DESTINO' {Escolher-DestinoBackup} $script:Paleta.Cian 150 34;$b.Location=New-Object Drawing.Point(0,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'CRIAR PARTIÇÃO' {Criar-ParticaoBackup} $script:Paleta.Rosa 135 34;$b.Location=New-Object Drawing.Point(155,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'ANALISAR TAMANHO' {Analisar-Backup} $script:Paleta.Neon 155 34;$b.Location=New-Object Drawing.Point(295,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'FAZER BACKUP' {Analisar-Backup;Fazer-Backup} $script:Paleta.Neon 130 34;$b.Location=New-Object Drawing.Point(455,2);$line.Controls.Add($b)
+$b=Novo-BotaoPequeno 'RESTAURAR BACKUP' {Restaurar-Backup} $script:Paleta.Cian 155 34;$b.Location=New-Object Drawing.Point(590,2);$line.Controls.Add($b)
+$pgBackup.Controls.Add($line);$pgBackup.SetFlowBreak($line,$true)
+$script:BackupDestino=$null;$script:BackupFiles=@();$script:BackupBytes=0L
+$script:BackupDestinoLabel=Novo-Label 'Destino: não selecionado' 9 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($script:BackupDestinoLabel);$pgBackup.SetFlowBreak($script:BackupDestinoLabel,$true)
+$script:BackupEstado=Novo-Label 'Escolha as categorias, destino e analise o tamanho antes de copiar.' 10 $script:Paleta.Texto 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($script:BackupEstado);$pgBackup.SetFlowBreak($script:BackupEstado,$true)
+$warn2=Novo-Label 'Importante: uma partição no mesmo disco NÃO protege contra formatação do disco inteiro ou falha física. Para clientes, prefira HD/SSD externo. A restauração procura backups nas raízes dos discos conectados.' 9 $script:Paleta.Amarelo 'Segoe UI' 'Regular' 900;$pgBackup.Controls.Add($warn2);$pgBackup.SetFlowBreak($warn2,$true)
+
+# ============================================================
+#  PAGINA: PROGRAMAS
+# ============================================================
+$pgProgramas=Nova-Pagina 'programas' 'Programas' 'Biblioteca local de ferramentas e instaladores da pasta programas.'
+Nova-Secao $pgProgramas 'BIBLIOTECA DE PROGRAMAS'
+$lblAjudaProgramas=Novo-Label 'Adicione qualquer arquivo ou programa pela pasta ou botão ADICIONAR ARQUIVOS. Itens desconhecidos e scripts exibem confirmação antes de executar.' 9 $script:Paleta.Mudo 'Segoe UI' 'Regular' 900
+$pgProgramas.Controls.Add($lblAjudaProgramas);$pgProgramas.SetFlowBreak($lblAjudaProgramas,$true)
+$linhaProgramas=New-Object System.Windows.Forms.Panel;$linhaProgramas.Width=900;$linhaProgramas.Height=44
+$txtBuscaProgramas=New-Object System.Windows.Forms.TextBox;$txtBuscaProgramas.Location=New-Object System.Drawing.Point(0,4);$txtBuscaProgramas.Size=New-Object System.Drawing.Size(245,30);$txtBuscaProgramas.Font=(Fonte 'Segoe UI' 10 'Regular');$txtBuscaProgramas.BackColor=(ParaCor $script:Paleta.Painel);$txtBuscaProgramas.ForeColor=(ParaCor $script:Paleta.Texto);$linhaProgramas.Controls.Add($txtBuscaProgramas)
+$btnPastaProgramas=Novo-BotaoPequeno 'IMPORTAR PASTA' {Adicionar-PastaProgramas} $script:Paleta.Neon 130 34;$btnPastaProgramas.Location=New-Object System.Drawing.Point(255,2);$linhaProgramas.Controls.Add($btnPastaProgramas)
+$btnAdicionarArquivos=Novo-BotaoPequeno 'ADICIONAR ARQUIVOS' {Adicionar-ArquivosProgramas} $script:Paleta.Rosa 145 34;$btnAdicionarArquivos.Location=New-Object System.Drawing.Point(390,2);$linhaProgramas.Controls.Add($btnAdicionarArquivos)
+$btnAutoProgramas=Novo-BotaoPequeno 'LOCALIZAR HS-TECH' {Importar-PastaProgramasLocal} $script:Paleta.Cian 145 34;$btnAutoProgramas.Location=New-Object System.Drawing.Point(540,2);$linhaProgramas.Controls.Add($btnAutoProgramas)
+$btnAtualizarProgramas=Novo-BotaoPequeno 'ATUALIZAR LISTA' {Atualizar-ListaProgramas} $script:Paleta.Neon 130 34;$btnAtualizarProgramas.Location=New-Object System.Drawing.Point(690,2);$linhaProgramas.Controls.Add($btnAtualizarProgramas)
+$pgProgramas.Controls.Add($linhaProgramas);$pgProgramas.SetFlowBreak($linhaProgramas,$true)
+$listaProgramas=New-Object System.Windows.Forms.ListView;$listaProgramas.View='Details';$listaProgramas.FullRowSelect=$true;$listaProgramas.GridLines=$true;$listaProgramas.Size=New-Object System.Drawing.Size(900,390);$listaProgramas.BackColor=(ParaCor $script:Paleta.Painel);$listaProgramas.ForeColor=(ParaCor $script:Paleta.Texto)
+[void]$listaProgramas.Columns.Add('Arquivo',220);[void]$listaProgramas.Columns.Add('Tipo',145);[void]$listaProgramas.Columns.Add('Segurança',150);[void]$listaProgramas.Columns.Add('Caminho',375)
+$pgProgramas.Controls.Add($listaProgramas);$pgProgramas.SetFlowBreak($listaProgramas,$true)
+$btnAbrirPrograma=Novo-Botao 'ABRIR / EXECUTAR SELECIONADO - confirmação antes de executar' {Abrir-ProgramaSelecionado} $script:Paleta.Neon 340 70
+$btnRemoverPrograma=Novo-Botao 'Remover da biblioteca - preserva o arquivo original' {Remover-ProgramaSelecionado} $script:Paleta.Rosa 280 70
+$pgProgramas.Controls.Add($btnAbrirPrograma);$pgProgramas.Controls.Add($btnRemoverPrograma)
+$script:ListaProgramasUI=$listaProgramas;$script:BuscaProgramasUI=$txtBuscaProgramas;$script:BuscaProgramasUI.Add_TextChanged({Atualizar-ListaProgramas})
+Atualizar-ListaProgramas
+Importar-PastaProgramasLocal
+
+#  PAGINA: DESEMPENHO
+# ============================================================
+$pgDes = Nova-Pagina 'desempenho' 'Desempenho' 'Limpeza, energia, Modo Jogo e ajustes do sistema para ganhar FPS e estabilidade.'
+Nova-Secao $pgDes 'LIMPEZA E ENERGIA'
+$pgDes.Controls.Add((Novo-Botao "Analisar memoria e processos`nVeja os maiores consumidores de RAM e feche apenas os selecionados" { Gerenciar-MemoriaProcessos } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Limpar temporários`nPreserva o cache de shaders e a Lixeira" { Limpar-Temporarios }))
+$pgDes.Controls.Add((Novo-Botao "Limpar cache dos navegadores`nChrome, Edge, Brave e Firefox (senhas preservadas)" { Limpar-Navegadores }))
+$pgDes.Controls.Add((Novo-Botao "Plano Alto desempenho`nAtiva o plano de energia de alto desempenho" { Ajustar-Energia }))
+$pgDes.Controls.Add((Novo-Botao "Plano Desempenho máximo`nPlano oculto do Windows, sem economia de energia" { Ativar-DesempenhoMaximo } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Modo Jogo do Windows`nAtiva o Modo Jogo e desliga a captura em segundo plano" { Ajustar-ModoJogo }))
+Nova-Secao $pgDes 'PERFIS DE ENERGIA'
+$pgDes.Controls.Add((Novo-Botao "Perfil Jogos`nAlto desempenho, quando disponível" { Aplicar-Perfil 'Jogos' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Perfil Desempenho máximo`nMáximo possível: mais consumo e calor" { Aplicar-Perfil 'Maximo' } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Perfil Equilibrado`nUso diário com consumo moderado" { Aplicar-Perfil 'Equilibrado' } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Perfil Economia`nReduz o consumo, quando disponível" { Aplicar-Perfil 'Economia' } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'MODO PERFORMANCE'
+$pgDes.Controls.Add((Novo-Botao "Modo Performance: ligar`nFecha apps de fundo e ativa alto desempenho" { Entrar-ModoPerformance } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Modo Performance: desligar`nRestaura o plano de energia anterior" { Sair-ModoPerformance } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Liberar RAM em espera`nLimpa a lista de espera da memória" { Liberar-RAM } $script:Paleta.Rosa))
+Nova-Secao $pgDes 'AJUSTES AVANÇADOS (PEDEM CONFIRMAÇÃO)'
+$pgDes.Controls.Add((Novo-Botao "GPU e efeitos visuais`nHAGS, menos animações e transparência" { Ajustar-GPUSistema } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Horário ativo do Windows Update`nEvita reinício enquanto você joga" { Definir-HorarioAtivo } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Remover bloatware`nEscolha os apps inúteis que deseja remover" { Remover-Bloatware } $script:Paleta.Amarelo))
+Nova-Secao $pgDes 'INICIALIZAÇÃO E HARDWARE'
+$pgDes.Controls.Add((Novo-Botao "Apps de inicialização`nLista o que abre junto com o Windows" { Listar-Inicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Inicialização do Windows`nAbre as ferramentas nativas do Windows" { Abrir-GerenciadorInicializacao } $script:Paleta.Cian))
+$pgDes.Controls.Add((Novo-Botao "Ativar ou desativar apps`nEscolha o que inicia com o Windows (reversível)" { Gerenciar-Inicializacao } $script:Paleta.Rosa))
+$pgDes.Controls.Add((Novo-Botao "Resumo de hardware`nCPU, RAM, GPU e discos detectados" { Mostrar-ResumoHardware } $script:Paleta.Neon))
+$pgDes.Controls.Add((Novo-Botao "Liberar todos os núcleos`nRemove limites de boot e desativa o core parking" { Liberar-Nucleos } $script:Paleta.Neon))
+
+# ============================================================
+#  PAGINA: DISCO
+# ============================================================
+$pgDisco = Nova-Pagina 'disco' 'Disco' 'Saúde, verificação, otimização e velocidade. TRIM em SSD e desfragmentação apenas em HDD.'
+Nova-Secao $pgDisco 'DIAGNÓSTICO'
+$pgDisco.Controls.Add((Novo-Botao "Saúde e espaço`nSMART, temperatura e desgaste" { Saude-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "Recomendações por unidade`nEspaço livre e tipo SSD/HDD" { Recomendar-Armazenamento } $script:Paleta.Cian))
+$pgDisco.Controls.Add((Novo-Botao "Verificar erros`nVarredura somente leitura" { Verificar-Disco }))
+$pgDisco.Controls.Add((Novo-Botao "Benchmark do disco`nVelocidade de leitura e escrita" { Benchmark-Disco } $script:Paleta.Cian))
+Nova-Secao $pgDisco 'OTIMIZAÇÃO E REPARO'
+$pgDisco.Controls.Add((Novo-Botao "Otimizar discos`nTRIM no SSD e desfragmentação no HDD" { Otimizar-Disco } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Verificação com reparo`nAgenda o CHKDSK para a reinicialização" { Agendar-VerificacaoReparo } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Arquivos do Windows (SFC)`nVerifica a integridade do sistema" { Verificar-ArquivosWindows } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Reparar imagem do Windows (DISM)`nCorrige a base do sistema (precisa de internet)" { Reparar-Imagem } $script:Paleta.Rosa))
+$pgDisco.Controls.Add((Novo-Botao "Reparo completo (DISM + SFC)`nSequência recomendada, de 20 a 40 minutos" { Reparo-Completo } $script:Paleta.Amarelo))
+$pgDisco.Controls.Add((Novo-Botao "Limpeza profunda do Windows`nCache do Windows Update, componentes, relatórios de erro e mais" { Limpeza-Profunda } $script:Paleta.Rosa))
+
+# ============================================================
+#  PAGINA: REDE
+# ============================================================
+$pgRede = Nova-Pagina 'rede' 'Rede' 'Limpe o cache DNS, teste a latência e escolha um servidor DNS mais rápido.'
+Nova-Secao $pgRede 'DIAGNÓSTICO'
+$pgRede.Controls.Add((Novo-Botao "Limpar DNS e testar ping`nLatência para 1.1.1.1 e 8.8.8.8" { Otimizar-Rede }))
+$pgRede.Controls.Add((Novo-Botao "Diagnóstico completo`nAdaptadores, IP, gateway, DNS e conectividade" { Diagnostico-RedeCompleto } $script:Paleta.Cian))
+Nova-Secao $pgRede 'SERVIDOR DNS'
+$cartaoDns = Novo-Cartao 'ESCOLHER SERVIDOR' 124
+$lblDns = New-Object System.Windows.Forms.Label
+$lblDns.Text = 'Altera o DNS de todos os adaptadores conectados. Para voltar ao original, use "Desfazer ajustes" no Painel.'
+$lblDns.AutoSize = $true
+$lblDns.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblDns.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblDns.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoDns.Corpo.Controls.Add($lblDns)
+$script:ComboDns = New-Object System.Windows.Forms.ComboBox
+$script:ComboDns.DropDownStyle = 'DropDownList'
+$script:ComboDns.Size = New-Object System.Drawing.Size(290, 30)
+$script:ComboDns.Font = (Fonte 'Segoe UI' 10 'Regular')
+$script:ComboDns.FlatStyle = 'Flat'
+$script:ComboDns.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:ComboDns.ForeColor = (ParaCor $script:Paleta.Texto)
+[void]$script:ComboDns.Items.Add('Automático (padrão)')
+[void]$script:ComboDns.Items.Add('Cloudflare (1.1.1.1)')
+[void]$script:ComboDns.Items.Add('Google (8.8.8.8)')
+$script:ComboDns.SelectedIndex = 0
+$script:ComboDns.Location = New-Object System.Drawing.Point(18, 74)
+$cartaoDns.Corpo.Controls.Add($script:ComboDns)
+$btnAplicarDns = Novo-BotaoPequeno 'APLICAR DNS' {
+    Executar-Acao {
+        $i = $script:ComboDns.SelectedIndex
+        if ($i -eq 1) { Aplicar-DNS 'Cloudflare' } elseif ($i -eq 2) { Aplicar-DNS 'Google' } else { Aplicar-DNS 'Automatico' }
+    }
+} $script:Paleta.Neon 150 34
+$btnAplicarDns.Location = New-Object System.Drawing.Point(324, 72)
+$cartaoDns.Corpo.Controls.Add($btnAplicarDns)
+$pgRede.Controls.Add($cartaoDns.Outer)
+$pgRede.SetFlowBreak($cartaoDns.Outer, $true)
+
+# ============================================================
+#  PAGINA: PERFIS POR JOGO
+# ============================================================
+$pgJogos = Nova-Pagina 'jogos' 'Perfis por jogo' 'Ao abrir um jogo da lista, o Modo Performance liga sozinho; ao fechar, tudo volta ao normal. Mantenha este programa aberto (ele fica na bandeja).'
+$cartaoAuto = Novo-Cartao 'DETECÇÃO AUTOMÁTICA' 100
+$script:ChkAuto = New-Object System.Windows.Forms.CheckBox
+$script:ChkAuto.Text = 'Ativar o Modo Performance automaticamente ao abrir um jogo da lista'
+$script:ChkAuto.AutoSize = $true
+$script:ChkAuto.Font = (Fonte 'Segoe UI Semibold' 10 'Regular')
+$script:ChkAuto.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ChkAuto.Checked = [bool]$script:Cfg.Auto
+$script:ChkAuto.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoAuto.Corpo.Controls.Add($script:ChkAuto)
+$script:LblStatusJogo = New-Object System.Windows.Forms.Label
+$script:LblStatusJogo.Text = 'Aguardando um jogo da lista...'
+$script:LblStatusJogo.AutoSize = $true
+$script:LblStatusJogo.Font = (Fonte 'Segoe UI' 9 'Regular')
+$script:LblStatusJogo.ForeColor = (ParaCor $script:Paleta.Mudo)
+$script:LblStatusJogo.Location = New-Object System.Drawing.Point(40, 68)
+$cartaoAuto.Corpo.Controls.Add($script:LblStatusJogo)
+$pgJogos.Controls.Add($cartaoAuto.Outer)
+$pgJogos.SetFlowBreak($cartaoAuto.Outer, $true)
+
+$cartaoLista = Novo-Cartao 'JOGOS MONITORADOS' 300
+$script:ListaJogos = New-Object System.Windows.Forms.ListBox
+$script:ListaJogos.Size = New-Object System.Drawing.Size(340, 230)
+$script:ListaJogos.Location = New-Object System.Drawing.Point(18, 44)
+$script:ListaJogos.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:ListaJogos.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ListaJogos.BorderStyle = 'FixedSingle'
+$script:ListaJogos.Font = (Fonte 'Consolas' 10 'Regular')
+foreach ($j in $script:Jogos) { [void]$script:ListaJogos.Items.Add($j) }
+$cartaoLista.Corpo.Controls.Add($script:ListaJogos)
+
+$lblDica = New-Object System.Windows.Forms.Label
+$lblDica.Text = "Digite o nome do processo do jogo, sem .exe.`nVeja o nome no Gerenciador de Tarefas.`nEx.: cs2, GTA5, VALORANT-Win64-Shipping"
+$lblDica.AutoSize = $true
+$lblDica.Font = (Fonte 'Segoe UI' 9 'Regular')
+$lblDica.ForeColor = (ParaCor $script:Paleta.Mudo)
+$lblDica.Location = New-Object System.Drawing.Point(384, 44)
+$cartaoLista.Corpo.Controls.Add($lblDica)
+
+$script:TxtJogo = New-Object System.Windows.Forms.TextBox
+$script:TxtJogo.Location = New-Object System.Drawing.Point(384, 118)
+$script:TxtJogo.Width = 300
+$script:TxtJogo.Font = (Fonte 'Consolas' 10 'Regular')
+$script:TxtJogo.BackColor = (ParaCor $script:Paleta.Fundo)
+$script:TxtJogo.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:TxtJogo.BorderStyle = 'FixedSingle'
+$cartaoLista.Corpo.Controls.Add($script:TxtJogo)
+
+$btnAddJogo = Novo-BotaoPequeno 'ADICIONAR' {
+    $nome = ("$($script:TxtJogo.Text)".Trim()) -replace '\.exe$', ''
+    if ($nome -and ($script:Jogos -notcontains $nome)) {
+        $script:Jogos += $nome
+        [void]$script:ListaJogos.Items.Add($nome)
+        Salvar-Jogos
+        Log "Jogo adicionado: $nome" Green
+    }
+    $script:TxtJogo.Text = ''
+} $script:Paleta.Neon 144 36
+$btnAddJogo.Location = New-Object System.Drawing.Point(384, 158)
+$cartaoLista.Corpo.Controls.Add($btnAddJogo)
+
+$btnRemJogo = Novo-BotaoPequeno 'REMOVER' {
+    $sel = $script:ListaJogos.SelectedItem
+    if ($sel) {
+        $script:Jogos = @($script:Jogos | Where-Object { $_ -ne $sel })
+        $script:ListaJogos.Items.Remove($sel)
+        Salvar-Jogos
+        Log "Jogo removido: $sel" Yellow
+    }
+} $script:Paleta.Rosa 144 36
+$btnRemJogo.Location = New-Object System.Drawing.Point(540, 158)
+$cartaoLista.Corpo.Controls.Add($btnRemJogo)
+$pgJogos.Controls.Add($cartaoLista.Outer)
+$pgJogos.SetFlowBreak($cartaoLista.Outer, $true)
+
+# ============================================================
+#  PAGINA: MONITOR E ALERTAS
+# ============================================================
+$pgMon = Nova-Pagina 'monitor' 'Monitor e alertas' 'Receba um aviso na bandeja quando as temperaturas passarem do limite. A temperatura da CPU depende do suporte da placa-mãe e pode aparecer como N/D.'
+$cartaoAlerta = Novo-Cartao 'ALERTAS DE TEMPERATURA' 136
+$script:ChkAlertas = New-Object System.Windows.Forms.CheckBox
+$script:ChkAlertas.Text = 'Ativar alertas de temperatura'
+$script:ChkAlertas.AutoSize = $true
+$script:ChkAlertas.Font = (Fonte 'Segoe UI Semibold' 10 'Regular')
+$script:ChkAlertas.ForeColor = (ParaCor $script:Paleta.Texto)
+$script:ChkAlertas.Checked = [bool]$script:Cfg.Alertas
+$script:ChkAlertas.Location = New-Object System.Drawing.Point(18, 40)
+$cartaoAlerta.Corpo.Controls.Add($script:ChkAlertas)
+
+function Novo-Limite {
+    param($Pai, [string]$Rotulo, [int]$Valor, [int]$X)
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $Rotulo
+    $l.AutoSize = $true
+    $l.Font = (Fonte 'Segoe UI' 9.5 'Regular')
+    $l.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $l.Location = New-Object System.Drawing.Point($X, 84)
+    $Pai.Controls.Add($l)
+    $n = New-Object System.Windows.Forms.NumericUpDown
+    $n.Minimum = 40; $n.Maximum = 120; $n.Value = $Valor
+    $n.Width = 70
+    $n.BackColor = (ParaCor $script:Paleta.Fundo)
+    $n.ForeColor = (ParaCor $script:Paleta.Texto)
+    $n.Location = New-Object System.Drawing.Point(($X + 140), 80)
+    $Pai.Controls.Add($n)
+    $u = New-Object System.Windows.Forms.Label
+    $u.Text = ([string][char]0x00B0) + 'C'
+    $u.AutoSize = $true
+    $u.ForeColor = (ParaCor $script:Paleta.Mudo)
+    $u.Location = New-Object System.Drawing.Point(($X + 216), 84)
+    $Pai.Controls.Add($u)
+    return $n
+}
+$script:NumCpu   = Novo-Limite $cartaoAlerta.Corpo 'Limite da CPU' ([int]$script:Cfg.CpuMax) 18
+$script:NumGpu   = Novo-Limite $cartaoAlerta.Corpo 'Limite da GPU' ([int]$script:Cfg.GpuMax) 300
+$script:NumDisco = Novo-Limite $cartaoAlerta.Corpo 'Limite do disco' ([int]$script:Cfg.DiscoMax) 582
+$pgMon.Controls.Add($cartaoAlerta.Outer)
+$pgMon.SetFlowBreak($cartaoAlerta.Outer, $true)
+
+Nova-Secao $pgMon 'HISTÓRICO DA SESSÃO (CPU, GPU E TEMPERATURAS)'
+$script:Grafico = New-Object System.Windows.Forms.Panel
+$script:Grafico.Height = 200
+$script:Grafico.Width = 880
+$script:Grafico.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 16)
+Ativar-DoubleBuffer $script:Grafico
+$script:Grafico.Add_Paint({ param($s, $e) Desenhar-Grafico $e.Graphics $s })
+$pgMon.Controls.Add($script:Grafico)
+$pgMon.SetFlowBreak($script:Grafico, $true)
+[void]$script:ItensLargos.Add($script:Grafico)
+
+Nova-Secao $pgMon 'FERRAMENTAS'
+$pgMon.Controls.Add((Novo-Botao "Monitorar no console`n10 leituras de CPU, RAM e GPU" { Monitorar-Console }))
+$pgMon.Controls.Add((Novo-Botao "Exportar histórico (CSV)`nResumo da sessão e arquivo para planilha" { Exportar-Historico } $script:Paleta.Neon))
+$pgMon.Controls.Add((Novo-Botao "Testar notificação`nMostra um aviso de teste na bandeja" {
+    $script:Tray.ShowBalloonTip(4000, 'HS-Tech | Central de Ferramentas', 'Notificação de teste: os alertas estão funcionando.', [System.Windows.Forms.ToolTipIcon]::Info)
+    Log 'Notificação de teste enviada.' Green
+} $script:Paleta.Cian))
+
+# ============================================================
+#  PAGINA: DRIVERS
+# ============================================================
+$pgDrv = Nova-Pagina 'drivers' 'Drivers' 'Encontre, faça backup e atualize drivers com segurança. Antes de instalar, a ferramenta cria um ponto de restauração e oferece um backup dos drivers atuais.'
+Nova-Secao $pgDrv 'ASSISTENTE'
+$btnAssistDrv = Novo-Botao "Assistente de drivers (recomendado)`nVerifica problemas, mostra a idade dos drivers e procura atualizações no Windows Update" { Assistente-Drivers } $script:Paleta.Neon 558 84
+$pgDrv.Controls.Add($btnAssistDrv)
+$pgDrv.SetFlowBreak($btnAssistDrv, $true)
+Nova-Secao $pgDrv 'VERIFICAÇÃO E ATUALIZAÇÃO'
+$pgDrv.Controls.Add((Novo-Botao "Procurar atualizações de drivers`nBusca no Windows Update e você escolhe o que instalar" { Atualizar-Drivers } $script:Paleta.Rosa))
+$pgDrv.Controls.Add((Novo-Botao "Dispositivos com problema`nLista hardware com driver ausente ou com erro" { Verificar-DispositivosProblema } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Idade dos drivers`nMostra drivers de componentes principais com mais de 3 anos" { Inventario-Drivers } $script:Paleta.Cian))
+Nova-Secao $pgDrv 'SEGURANÇA'
+$pgDrv.Controls.Add((Novo-Botao "Backup dos drivers atuais`nExporta os drivers instalados para uma pasta à sua escolha" { Backup-Drivers } $script:Paleta.Neon))
+$pgDrv.Controls.Add((Novo-Botao "Criar ponto de restauração`nPermite voltar o Windows ao estado atual" { Criar-PontoRestauracao } $script:Paleta.Cian))
+Nova-Secao $pgDrv 'FABRICANTES E FERRAMENTAS DO WINDOWS'
+$pgDrv.Controls.Add((Novo-Botao "Drivers de vídeo (site oficial)`nVersão atual e página do fabricante da placa de vídeo" { Verificar-Drivers } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Drivers do fabricante do PC`nPesquisa o modelo do equipamento ou da placa-mãe" { Abrir-DriversFabricante } $script:Paleta.Cian))
+$pgDrv.Controls.Add((Novo-Botao "Gerenciador de Dispositivos`nAbre a ferramenta nativa do Windows" { Start-Process devmgmt.msc } $script:Paleta.Cian))
+
+# ============================================================
+#  PAGINA: DIAGNOSTICO
+# ============================================================
+$pgDiag = Nova-Pagina 'diag' 'Diagnóstico' 'Descubra o que realmente limita o PC antes de ajustar: erros do Windows, drivers, segurança, bateria e testes de estabilidade.'
+Nova-Secao $pgDiag 'VISÃO GERAL'
+$btnDiagCompleto = Novo-Botao "Diagnóstico completo`nHardware, erros, drivers, segurança e discos, com relatório HTML" { Diagnostico-Completo } $script:Paleta.Neon 558 78
+$pgDiag.Controls.Add($btnDiagCompleto)
+$pgDiag.SetFlowBreak($btnDiagCompleto, $true)
+Nova-Secao $pgDiag 'ANÁLISES'
+$pgDiag.Controls.Add((Novo-Botao "Erros do Windows`nFalhas de disco, energia, hardware e travamentos (7 dias)" { Diagnostico-Eventos } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Tempo ligado e reinício pendente`nIndica se o PC precisa reiniciar" { Diagnostico-Sistema } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Hardware e configuração`nNúcleos, RAM (XMP/EXPO) e taxa do monitor" { Diagnostico-PC } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Drivers de vídeo`nVersão, data e página oficial do fabricante" { Verificar-Drivers } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Antivírus e atualizações`nProteção ativa e última atualização do Windows" { Diagnostico-Seguranca } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Saúde da bateria`nCapacidade atual e relatório do Windows" { Saude-Bateria } $script:Paleta.Cian))
+$pgDiag.Controls.Add((Novo-Botao "Abrir o Windows Update`nBusca e instala atualizações" { Start-Process 'ms-settings:windowsupdate' } $script:Paleta.Neon))
+Nova-Secao $pgDiag 'TESTES'
+$pgDiag.Controls.Add((Novo-Botao "Teste de estabilidade da CPU`n60 segundos com leitura de temperatura" { Teste-Estabilidade 60 } $script:Paleta.Amarelo))
+$pgDiag.Controls.Add((Novo-Botao "Teste de memória do Windows`nAgenda o teste de RAM na reinicialização" { Testar-Memoria } $script:Paleta.Amarelo))
+$pgDiag.Controls.Add((Novo-Botao "Verificação rápida do Defender`nProcura ameaças nas áreas principais" { Escanear-Defender } $script:Paleta.Amarelo))
+
+# ============================================================
+#  PAGINA: AGENDAR E RELATORIOS
+# ============================================================
+$pgAg = Nova-Pagina 'agenda' 'Agendar e relatórios' 'Manutenção automática semanal, relatórios do sistema e histórico de atividades.'
+Nova-Secao $pgAg 'MANUTENÇÃO AUTOMÁTICA'
+$pgAg.Controls.Add((Novo-Botao "Agendar manutenção semanal`nDomingo às 04:00 (roda ao ligar, se perdeu)" { Agendar-Manutencao }))
+$pgAg.Controls.Add((Novo-Botao "Remover agendamento`nCancela a manutenção automática" { Remover-Agendamento } $script:Paleta.Rosa))
+Nova-Secao $pgAg 'RELATÓRIOS E LOGS'
+$pgAg.Controls.Add((Novo-Botao "Exportar relatório do PC`nGera um arquivo com hardware e uso atual" { Exportar-RelatorioSistema } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Abrir histórico de atividades`nOperações registradas hoje" { Abrir-Historico } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "Abrir pasta de logs`nLogs e relatórios antes/depois" { Start-Process explorer.exe -ArgumentList "`"$($script:Pasta)`"" } $script:Paleta.Cian))
+Nova-Secao $pgAg 'RELATÓRIO PARA O CLIENTE E CONFIGURAÇÕES'
+$pgAg.Controls.Add((Novo-Botao "Dados do atendimento`nCliente, técnico, observações e logo para o relatório" { Editar-DadosAtendimento } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Gerar relatório HTML`nDocumento visual com diagnóstico, antes/depois e ajustes" { Relatorio-HTML-Agora } $script:Paleta.Neon))
+$pgAg.Controls.Add((Novo-Botao "Exportar configurações`nSalva lista de jogos e limites em um arquivo" { Exportar-Config } $script:Paleta.Cian))
+$pgAg.Controls.Add((Novo-Botao "Importar configurações`nCarrega um arquivo salvo anteriormente" { Importar-Config } $script:Paleta.Cian))
+Nova-Secao $pgAg 'FINALIZAR ATENDIMENTO'
+$pgAg.Controls.Add((Novo-Botao "Limpeza total para entrega`nRemove contas e dados locais do técnico, preservando Windows e aplicativos" { Limpeza-Entrega } '#FF5C7A' 558 84))
+$pgAg.Controls.Add((Novo-Botao "Finalizar e remover a ferramenta`nGera o relatório final, remove os agendamentos e apaga o programa deste PC" { Finalizar-Remover } '#FF5C7A' 558 78))
+
+# ============================================================
+#  EVENTOS, BANDEJA E TIMER
+# ============================================================
+$script:ChkAuto.Add_CheckedChanged({ Salvar-Config })
+$script:ChkAlertas.Add_CheckedChanged({ Salvar-Config })
+$script:NumCpu.Add_ValueChanged({ Salvar-Config })
+$script:NumGpu.Add_ValueChanged({ Salvar-Config })
+$script:NumDisco.Add_ValueChanged({ Salvar-Config })
+
+$script:Tray = New-Object System.Windows.Forms.NotifyIcon
+$script:Tray.Icon = [System.Drawing.SystemIcons]::Shield
+$script:Tray.Text = 'HS-Tech'
+$script:Tray.Visible = $true
+$menuTray = New-Object System.Windows.Forms.ContextMenuStrip
+$miAbrir = $menuTray.Items.Add('Abrir')
+$miAbrir.Add_Click({ $script:Form.Show(); $script:Form.WindowState = 'Normal'; $script:Form.Activate() })
+$miSair = $menuTray.Items.Add('Sair')
+$miSair.Add_Click({ $script:Form.Close() })
+$script:Tray.ContextMenuStrip = $menuTray
+$script:Tray.Add_DoubleClick({ $script:Form.Show(); $script:Form.WindowState = 'Normal'; $script:Form.Activate() })
+
+$script:Form.Add_Resize({
+    if ($script:Form.WindowState -eq 'Minimized') {
+        $script:Form.Hide()
+        $script:Tray.ShowBalloonTip(2500, 'HS-Tech | Central de Ferramentas', 'Continua rodando na bandeja (detecção de jogos e alertas).', [System.Windows.Forms.ToolTipIcon]::Info)
+    } else {
+        Ajustar-Larguras
+    }
+})
+
+$script:Timer = New-Object System.Windows.Forms.Timer
+$script:Timer.Interval = 3000
+$script:Timer.Add_Tick({
+    if ($script:EmTick -or $script:Ocupado) { return }
+    $script:EmTick = $true
+    try { Atualizar-Painel; Verificar-Jogos } catch { } finally { $script:EmTick = $false }
+})
+
+$script:Form.Add_FormClosing({
+    $script:Timer.Stop()
+    if ($script:ModoJogoAtivo) { Sair-ModoPerformance }
+    Restaurar-Notificacoes
+    $script:Tray.Visible = $false
+    $script:Tray.Dispose()
+})
+
+$script:Form.Add_Shown({
+    Ajustar-Larguras
+    Log 'Sistema pronto. Escolha uma área no menu ou execute a manutenção recomendada.' Green
+    if (-not $script:TemNvidia) { Log 'GPU: o HS-Tech tenta ler uso pelo contador nativo do Windows e temperatura via LibreHardwareMonitor/OpenHardwareMonitor. A temperatura depende do driver e do provedor de sensores instalado; valores indisponiveis aparecem como N/D.' Gray }
+    try { Atualizar-Painel } catch { }
+    try { $bk=@(Procurar-BackupsExistentes); if($bk.Count -gt 0){ Log ("Backup HS-Tech encontrado: {0}. Abra Backup e restauração para revisar e recuperar os dados." -f $bk.Count) Cyan; [void][Windows.Forms.MessageBox]::Show(("Foi encontrado backup HS-Tech em disco conectado:`r`n{0}`r`n`r`nAbra a página Backup e restauração para revisar e recuperar os dados." -f $bk[0]),'HS-Tech - Backup encontrado','OK','Information') } } catch { }
+    $script:Timer.Start()
+})
+
+Mostrar-Pagina 'inicio'
+[System.Windows.Forms.Application]::Run($script:Form)
+) { $alvos += $Matches[2].Trim() } }
+                    foreach ($alvo in ($alvos | Select-Object -Unique)) { & cmdkey.exe "/delete:$alvo" 2>$null | Out-Null }
+                    Log ("Credenciais locais processadas: {0}" -f $alvos.Count) Green
+                }
+                'tokens' {
+                    foreach ($p in @((Join-Path $env:LOCALAPPDATA 'Microsoft\TokenBroker\Cache'),(Join-Path $env:LOCALAPPDATA 'Microsoft\OneAuth'),(Join-Path $env:LOCALAPPDATA 'Microsoft\IdentityCache'),(Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\AC\TokenBroker'))) {
+                        if (Test-Path -LiteralPath $p) {
+                            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Where-Object {($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                    Log 'Caches locais de autenticação processados.' Green
+                }
+                'temp' {
+                    foreach ($p in @($env:TEMP,(Join-Path $env:LOCALAPPDATA 'Temp'))) {
+                        if ($p -and (Test-Path -LiteralPath $p)) { Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Where-Object {($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
+                    }
+                    Log 'Temporários do usuário removidos.' Green
+                }
+            }
+        } catch { Log ("Falha em {0}: {1}" -f $item.Id,$_.Exception.Message) Yellow }
+    }
+    Log 'Limpeza para entrega concluída. Reinicie e teste o PC antes de entregar.' Green
+    [void][Windows.Forms.MessageBox]::Show('Limpeza concluída. Windows e aplicativos instalados foram preservados. Reinicie e confirme os logins do cliente.','HS-Tech | Limpeza para entrega','OK','Information')
+}
+
+# ============================================================
 #  FINALIZAR ATENDIMENTO (relatorio final + remocao da ferramenta)
 # ============================================================
 function Descrever-Ajuste {
