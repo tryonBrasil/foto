@@ -4465,30 +4465,6 @@ $script:Form.Add_Shown({
 
 Mostrar-Pagina 'inicio'
 [System.Windows.Forms.Application]::Run($script:Form)
-) { $alvos += $Matches[2].Trim() } }
-                    foreach ($alvo in ($alvos | Select-Object -Unique)) { & cmdkey.exe "/delete:$alvo" 2>$null | Out-Null }
-                    Log ("Credenciais locais processadas: {0}" -f $alvos.Count) Green
-                }
-                'tokens' {
-                    foreach ($p in @((Join-Path $env:LOCALAPPDATA 'Microsoft\TokenBroker\Cache'),(Join-Path $env:LOCALAPPDATA 'Microsoft\OneAuth'),(Join-Path $env:LOCALAPPDATA 'Microsoft\IdentityCache'),(Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.AAD.BrokerPlugin_cw5n1h2txyewy\AC\TokenBroker'))) {
-                        if (Test-Path -LiteralPath $p) {
-                            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Where-Object {($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                    Log 'Caches locais de autenticação processados.' Green
-                }
-                'temp' {
-                    foreach ($p in @($env:TEMP,(Join-Path $env:LOCALAPPDATA 'Temp'))) {
-                        if ($p -and (Test-Path -LiteralPath $p)) { Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | Where-Object {($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
-                    }
-                    Log 'Temporários do usuário removidos.' Green
-                }
-            }
-        } catch { Log ("Falha em {0}: {1}" -f $item.Id,$_.Exception.Message) Yellow }
-    }
-    Log 'Limpeza para entrega concluída. Reinicie e teste o PC antes de entregar.' Green
-    [void][Windows.Forms.MessageBox]::Show('Limpeza concluída. Windows e aplicativos instalados foram preservados. Reinicie e confirme os logins do cliente.','HS-Tech | Limpeza para entrega','OK','Information')
-}
 
 # ============================================================
 #  FINALIZAR ATENDIMENTO (relatorio final + remocao da ferramenta)
