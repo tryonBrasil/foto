@@ -3232,7 +3232,7 @@ function Limpeza-Entrega {
     $digitado=[Microsoft.VisualBasic.Interaction]::InputBox($texto,'Confirmação final de segurança','')
     if ($digitado -cne 'LIMPAR') { Log 'Confirmação incorreta. Nada foi apagado.' Yellow; return }
     $pastas=@{
-        downloads=[Environment]::GetFolderPath('Downloads')
+        downloads=(Join-Path $env:USERPROFILE 'Downloads')
         desktop=[Environment]::GetFolderPath('Desktop')
         documents=[Environment]::GetFolderPath('MyDocuments')
         pictures=[Environment]::GetFolderPath('MyPictures')
