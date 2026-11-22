@@ -36,6 +36,51 @@ jobs:
           }
           Write-Host 'OK: sintaxe PowerShell aceita pelo parser do Windows.'
 
+      - name: Verificar inicializacao unica da interface
+        shell: powershell
+        run: |
+          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\\OtimizadorGamer.ps1') -Raw
+          $execucoes = [regex]::Matches($codigo, '(?m)^\\s*\\[System\\.Windows\\.Forms\\.Application\\]::Run\\(\\$script:Form\\)\\s*        shell: powershell
+        run: |
+          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1') -Raw
+          $verificacoes = @(
+            @{ Nome = 'Confirma limpeza'; Regex = 'Confirmar\s+"A limpeza remove arquivos temporarios' },
+            @{ Nome = 'Preserva Lixeira'; Regex = 'A Lixeira e preservada intencionalmente' },
+            @{ Nome = 'Backup DNS por adaptador'; Regex = 'DNSOriginal\|\$\(\$a\.ifIndex\)' },
+            @{ Nome = 'Restauracao DNS'; Regex = 'Set-DnsClientServerAddress -InterfaceIndex \$indice' },
+            @{ Nome = 'Confirma plano de energia'; Regex = 'Plano Alto desempenho ativado e confirmado' },
+            @{ Nome = 'Tratamento da bateria em notebook'; Regex = 'BatteryFullChargedCapacity|BatteryStaticData' },
+            @{ Nome = 'Identidade HS-Tech'; Regex = 'HS-TECH - CENTRAL DE FERRAMENTAS' },
+            @{ Nome = 'Valida espaço contíguo da nova partição'; Regex = '\$bloco\.Tamanho -lt \$bytes' },
+            @{ Nome = 'Nova partição usa o bloco validado'; Regex = 'New-Partition -DiskNumber \$partAtual\.DiskNumber -Offset \(\[UInt64\]\$bloco\.Inicio\)' },
+            @{ Nome = 'Rollback se a criação falhar'; Regex = '\$volumeReduzido -and -not \$particaoNovaCriada' },
+            @{ Nome = 'Remove cache HS-Tech na desinstalação'; Regex = '\$pastaDadosHS|pastaDadosHS' },
+            @{ Nome = 'Aviso sobre backup no mesmo disco'; Regex = 'MESMO disco' }
+          )
+          $falhas = @()
+          foreach ($v in $verificacoes) {
+            if ($codigo -notmatch $v.Regex) { $falhas += $v.Nome }
+            else { Write-Host ("OK: " + $v.Nome) }
+          }
+          # Verifica apenas a rotina de limpeza temporaria. A limpeza profunda
+          # tem uma opcao separada de Lixeira, escolhida explicitamente pelo usuario.
+          $rotinaLimpeza = [regex]::Match($codigo, '(?s)function\s+Limpar-Temporarios\b.*?(?=\r?\nfunction\s+|\z)').Value
+          if (-not $rotinaLimpeza) {
+            $falhas += 'Rotina Limpar-Temporarios nao encontrada'
+          } elseif ($rotinaLimpeza -match 'Clear-RecycleBin|LOCALAPPDATA\\NVIDIA\\DXCache|LOCALAPPDATA\\AMD\\DxCache') {
+            $falhas += 'A limpeza temporaria inclui Lixeira ou caches de shaders'
+          }
+          if ($falhas.Count -gt 0) {
+            $falhas | ForEach-Object { Write-Error ("Falhou: " + $_) }
+            exit 1
+          }
+          Write-Host 'OK: verificacoes estaticas de seguranca passaram.'
+)
+          if ($execucoes.Count -ne 1) { throw ("Esperada uma inicialização da interface; encontradas: {0}" -f $execucoes.Count) }
+          $restante = $codigo.Substring($execucoes[0].Index + $execucoes[0].Length)
+          if ($restante -match '(?m)^\\s*\\S') { throw 'Há código executável após Application.Run; isso pode reabrir a interface ao fechar a janela.' }
+          Write-Host 'OK: a interface é iniciada uma única vez e não há código executável após Application.Run.'
+
       - name: Verificar protecoes de limpeza e restauracao
         shell: powershell
         run: |
