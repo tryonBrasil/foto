@@ -2,7 +2,7 @@ name: Validar HS-Tech
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/**']
     paths:
       - 'codigo-fonte/OtimizadorGamer.ps1'
       - '.github/workflows/validar-otimizador.yml'
@@ -35,6 +35,16 @@ jobs:
             exit 1
           }
           Write-Host 'OK: sintaxe PowerShell aceita pelo parser do Windows.'
+
+      - name: Verificar inicializacao unica da interface
+        shell: powershell
+        run: |
+          $codigo = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'codigo-fonte\OtimizadorGamer.ps1') -Raw
+          $alvo = '[System.Windows.Forms.Application]::Run($script:Form)'
+          $quantidade = ([regex]::Matches($codigo, [regex]::Escape($alvo))).Count
+          if ($quantidade -ne 1) { throw ("Esperada uma inicialização da interface; encontradas: {0}" -f $quantidade) }
+          if (-not $codigo.TrimEnd().EndsWith($alvo)) { throw 'Há código após Application.Run; isso pode reabrir a interface ao fechar a janela.' }
+          Write-Host 'OK: a interface é iniciada uma única vez e Application.Run é a última instrução.'
 
       - name: Verificar protecoes de limpeza e restauracao
         shell: powershell
