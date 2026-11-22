@@ -2,7 +2,7 @@ name: Validar HS-Tech
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/**']
     paths:
       - 'codigo-fonte/OtimizadorGamer.ps1'
       - '.github/workflows/validar-otimizador.yml'
